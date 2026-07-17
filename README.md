@@ -1,0 +1,367 @@
+# Canonicity of model-generated text
+
+This project reproduces the generated-text experiment behind Figure 5 of
+[Geh et al., *Where is the signal in tokenization space?*](https://arxiv.org/abs/2408.08541).
+It evaluates only tokens sampled by the model. Prompt tokens and the BOS/EOS
+seed needed to start generation are conditioning context, never observations.
+
+## What the paper measures, and how this replication makes it executable
+
+Figure 5 samples token sequences **unconditionally** and plots the percentage
+whose tokenization is canonical as generated length increases. For a sampled
+token prefix `v`, the sequence-level test is:
+
+```text
+canonical(v) = 1[v == tokenizer.encode(tokenizer.decode(v))]
+```
+
+A prefix is non-canonical if the two complete token-id sequences differ
+anywhere. Thus Figure 5 classifies each sampled sequence at a length; it does
+not compute a proportion of intrinsically “non-canonical tokens.”
+
+The paper does not specify tokenizer API switches, EOS handling, or whether its
+curve was produced from independent truncations or shared long rollouts. This
+replication fixes those operational choices explicitly: canonical re-encoding
+uses no added special tokens; decoding cleanup is disabled; the seed/prompt and
+terminating EOS are excluded; every other sampled control token is retained;
+and every requested eligible prefix of each saved rollout is evaluated
+independently. A non-canonical prefix does not permanently taint a longer
+prefix, because a completed byte sequence or changed final merge boundary can
+make the longer round trip canonical. The optional dense segment analysis
+separately evaluates every intervening prefix `t`.
+
+### Non-canonical segments and recurrence
+
+A token is not intrinsically canonical or non-canonical. The additional
+analysis therefore defines a Boolean state for every generated prefix `1:t`.
+A **non-canonical segment** is a maximal consecutive run of non-canonical
+prefix states. Segment starts are transitions from canonical to non-canonical;
+this makes the number of deviations per rollout unambiguous without inventing
+a token-local label.
+
+At each even horizon `H`, the landmark is `H/2`. The recurrence risk set keeps
+only rollouts that retained at least `H` observed continuation token IDs and
+are canonical at the landmark:
+
+- exposure: at least one prior segment completed before the landmark;
+- outcome: a new segment starts after the landmark through `H`.
+
+A rollout still inside a segment at the landmark cannot start another segment,
+so it is excluded and counted explicitly rather than treated as a negative
+outcome. For one context the association uses Fisher's exact test. Multi-prompt
+experiments use an exact conditional test stratified by prompt: per-prompt
+hypergeometric null distributions are convolved, so sparse strata never fall
+back to an invalid asymptotic approximation. The common odds ratio is
+prompt-adjusted; pooled probabilities are explicitly descriptive. After the
+complete matrix finishes, `canonicity-aggregate` validates all 50 planned
+hypotheses and applies dependence-robust Benjamini-Yekutieli FDR correction.
+Untestable planned hypotheses conservatively enter that family with `p=1`.
+
+This is an association test, not evidence that one deviation causes another.
+It is also conditional on survival to `H`; exact eligible counts are always
+reported.
+
+For Figure 5, the paper's prose does not report a sample count, seed, or
+sampling hyperparameters. Its official arXiv v2 plotting data, preserved with
+hashes in [`references/`](references/README.md), imply 256 initial generations
+and shrinking denominators at longer lengths due to early termination. At 128
+tokens, that file reports 95.07% for Llama2-7B, 83.98% for Gemma-2B, and 60.63%
+for Mamba-130M. These are useful targets, but exact numerical reproduction is
+not guaranteed without the authors' sampling code and seed. (The paper's
+separate statement about 256 importance samples belongs to a different
+experiment.)
+
+## Result produced in this workspace
+
+`results/mamba-130m/` contains a complete 256-sample, 128-token unconditional
+run of the public Mamba-130M checkpoint at commit
+`1e76775f628fbf1350fbe4dbb3d971ba64af25a1`, using seed 0, batch size 32,
+and CPU inference. At 128 sampled continuation tokens, 155 of 231 surviving
+sequences were canonical:
+67.10%. Twenty-five generations had already emitted EOS and are shown in the
+`terminated_before_length` column rather than being silently treated as
+non-canonical.
+
+This reproduces the paper's qualitative decline but not its exact 60.63% Mamba
+endpoint. That difference is unsurprising: the paper does not publish its seed
+or sampling settings, while this run samples the full distribution and
+explicitly excludes the unsampled BOS seed from both the metric and x-axis.
+The characteristic early Mamba dip appears here at continuation token 4 but at
+token 5 in the paper's data. That one-position shift is consistent with Figure
+5 counting a one-token seed, although this cannot be proven without the
+authors' generation code.
+
+### Long-continuation results
+
+Two additional seed-0 **Mamba-130M** runs extend the experiment beyond the
+paper's unconditional 128-token figure. The conditioned run is our extension,
+not a paper condition. Counts below use only sequences with enough observed
+continuation token IDs to reach the checkpoint.
+
+| sampled continuation | unconditional (64 starts) | 4 × 1,024-token WikiText contexts (16 starts each, pooled) |
+|---:|---:|---:|
+| 128 | 44/58 = 75.86% | 46/64 = 71.88% |
+| 256 | 30/49 = 61.22% | 25/63 = 39.68% |
+| 512 | 15/37 = 40.54% | 8/61 = 13.11% |
+| 1,024 | 3/23 = 13.04% | 1/53 = 1.89% |
+| 2,048 | 0/9 = 0% | not sampled |
+
+These runs show that whole-prefix canonicity continues to fall far beyond 128
+tokens. The conditioned run is lower here, but it is an exploratory comparison:
+small survivor counts and prompt heterogeneity both matter, and prompt
+condition also changes EOS behavior. Per-prompt and unconditional rows retain
+Wilson 95% intervals. The pooled prompted percentage is descriptive and its
+interval is intentionally blank in newly generated outputs because rollouts
+sharing a prompt are not an iid sample from the WikiText prompt population.
+The checked-in exploratory pooled CSV predates that correction; do not use its
+pooled Wilson bounds for prompt-population inference.
+
+The corrected landmark recurrence analysis gives one preliminary signal. In
+the 64-rollout unconditional Mamba run at horizon 128, a later segment occurred
+in 29/35 at-risk rollouts with a completed prior segment versus 4/16 without
+one (odds ratio 14.5, two-sided Fisher `p=0.000113`). At horizon 256 the raw
+`p=0.0538`, and longer horizons have too few informative survivors. In the
+four-prompt exploratory run, exact prompt-stratified p-values are 0.604, 0.141,
+0.556, and 1.0 at horizons 128–1,024. These are unadjusted, single-model sanity
+checks—not the predeclared 50-hypothesis matrix result.
+
+## Run
+
+Use Python 3.9 or newer:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+The smallest paper model is the public Mamba checkpoint:
+
+```bash
+canonicity \
+  --model state-spaces/mamba-130m-hf \
+  --samples 256 \
+  --lengths 1:128 \
+  --batch-size 32 \
+  --seed 0 \
+  --output results/rerun-mamba-130m
+```
+
+The other paper checkpoints can be run in the same way (they may require a
+Hugging Face account with access):
+
+```bash
+canonicity --model google/gemma-2b --output results/rerun-gemma-2b
+canonicity --model meta-llama/Llama-2-7b-hf --output results/rerun-llama2-7b
+```
+
+Sampling is deliberately untruncated: `do_sample=True`, temperature 1,
+`top_k=0`, and `top_p=1`. This samples from the model distribution rather than
+the Transformers default top-50 distribution. `--dtype auto` preserves each
+checkpoint's native weight precision; an explicit dtype is a different model
+condition. All settings and resolved library/model revisions are recorded in
+`metadata.json`, and any missing, unexpected, or mismatched model weights abort
+the run before sampling.
+
+The checked-in Mamba result directories predate transactional sampling plans
+and are deliberately not treated as resumable. Use a new output directory for
+a new sampling run, as in the commands above.
+
+### Five-model experiment matrix
+
+The matrix runner contains the exact requested checkpoints:
+
+| alias | Hugging Face checkpoint |
+|---|---|
+| `gemma3-4b-it` | `google/gemma-3-4b-it` |
+| `qwen3-30b-a3b-instruct-2507` | `Qwen/Qwen3-30B-A3B-Instruct-2507` |
+| `gemma-2b-it` | `google/gemma-2b-it` |
+| `llama2-7b` | `meta-llama/Llama-2-7b-hf` |
+| `mamba-130m` | `state-spaces/mamba-130m-hf` |
+
+`google/gemma-2b-it` is the original Gemma 1 instruction-tuned 2B checkpoint.
+If “Gemma-2B-it” was intended to mean Gemma 2, use
+`google/gemma-2-2b-it` as a separate model condition rather than silently
+changing the checkpoint.
+
+Preview every unconditional job without loading weights:
+
+```bash
+canonicity-matrix \
+  --all-models \
+  --condition unconditional \
+  --dry-run
+```
+
+Run one isolated model/condition job, the recommended scheduler unit:
+
+```bash
+canonicity-matrix \
+  --model mamba-130m \
+  --condition unconditional
+
+canonicity-matrix \
+  --model mamba-130m \
+  --condition wikitext
+```
+
+Defaults are 32 unconditional rollouts or 64 rollouts for each of 100 fixed
+WikiText prompts, with checkpoints at 32, 64, 128, 256, 512, 1,024, and 2,048
+generated tokens. The full prompted matrix is 32,000 rollouts and up to 65.5
+million generated tokens, so schedule it one model/condition at a time.
+All contexts are tokenized and context-window-validated before batch zero.
+Sampling is then transactionally committed after every batch using a run plan
+bound to resolved model/tokenizer commits, tokenizer/runtime implementation,
+precision, attention backend, hardware placement, rendered input lengths,
+prompts, and settings. Re-running the same command resumes completed batches;
+any mismatch fails rather than mixing experiments. Use only one writer per job
+directory.
+
+The segment estimand requires checking every intervening prefix, which is
+generically quadratic in continuation length because tokenization can change at
+the final boundary. This work is CPU-parallel (`--segment-workers`, matrix
+default 4), starts only after `samples.jsonl` has been written, and can be rerun
+offline. A one-worker audit of the 64-rollout Mamba 2,048-token run took about
+82 seconds on this machine; the 6,400-rollout conditioned job is therefore a
+multi-hour analysis, not merely 13 million tokenizer operations.
+
+After all planned jobs complete:
+
+```bash
+canonicity-aggregate --results-root results/model-matrix
+```
+
+Aggregation refuses an incomplete or provenance-inconsistent ten-job matrix.
+It verifies artifact hashes and plan links, reconstructs summary and recurrence
+rows from the per-rollout segment source, and performs BY adjustment in log
+space. It writes `canonicity_all.csv`, `recurrence_all.csv`, and correction
+metadata; finite `log10_p_value` and `log10_by_q_value` retain extreme-tail
+information when ordinary float columns underflow to zero.
+
+Thirty-two unconditional rollouts are suitable as a pilot, but generally too
+few for a confirmatory recurrence test after EOS censoring. Increase
+`--unconditional-rollouts` for inference. Gemma and Llama checkpoints are
+license-gated, and exact BF16 Qwen-30B normally requires multi-GPU placement;
+the runner uses `device_map=auto` for Qwen and never substitutes quantized
+weights.
+
+### Optional conditioning prompts
+
+Repeat `--prompt` to report each context separately:
+
+```bash
+canonicity \
+  --model state-spaces/mamba-130m-hf \
+  --prompt "Once upon a time" \
+  --prompt "def fibonacci(n):" \
+  --output results/mamba-prompted
+```
+
+For named prompts, pass JSONL with either strings or objects:
+
+```json
+{"id": "prose", "text": "Once upon a time"}
+{"id": "code", "text": "def fibonacci(n):"}
+```
+
+Each prompt gets `--samples` independent continuations. The prompt's token ids
+are sliced from every generated output before canonicity is measured.
+
+For instruction-tuned models, `--prompt-mode chat` applies the tokenizer's
+native chat template. Raw-prefix mode remains the default because it measures
+continuations of exactly the same text across base and instruction-tuned
+models, without adding model-specific instructions. The rendered chat-template
+tokens are also conditioning context and are never evaluated.
+
+### Long continuations and dataset contexts
+
+Stepped ranges keep long runs tractable while retaining the paper's dense
+early curve. The endpoint is always included:
+
+```bash
+canonicity \
+  --model state-spaces/mamba-130m-hf \
+  --samples 64 \
+  --lengths 1:128,256:2048:128 \
+  --batch-size 32 \
+  --output results/rerun-mamba-130m-long-2048
+```
+
+Create fixed sequential contexts from the public WikiText-2 raw test split:
+
+```bash
+canonicity-prompts \
+  --dataset Salesforce/wikitext \
+  --config wikitext-2-raw-v1 \
+  --split test \
+  --tokenizer state-spaces/mamba-130m-hf \
+  --prompt-tokens 1024 \
+  --count 4 \
+  --output prompts/wikitext-2-test-mamba-1024.jsonl
+```
+
+Then sample long continuations conditioned on those contexts:
+
+```bash
+canonicity \
+  --model state-spaces/mamba-130m-hf \
+  --prompts-file prompts/wikitext-2-test-mamba-1024.jsonl \
+  --samples 16 \
+  --lengths 1:128,256:1024:128 \
+  --batch-size 16 \
+  --output results/rerun-mamba-130m-wikitext-1024x1024
+```
+
+Prompt JSONL records immutable dataset/tokenizer commit hashes and the source
+rows used to materialize each context. Runtime metadata separately records the
+actual input-token count seen by the tested model. This lets every model receive
+identical prompt text even when its tokenizer gives that text a different
+length.
+
+Exact recipes and resource constraints for Gemma 3 and Qwen are in
+[`experiments/README.md`](experiments/README.md).
+
+## Outputs
+
+- `summary.csv`: the Figure 5 statistic by context and prefix length, including
+  the exact denominator after early termination and a within-context Wilson
+  95% interval.
+- `pooled_summary.csv`: for multi-prompt runs, the primary aggregate formed by
+  pooling sequence counts (never by averaging prompt percentages); its
+  percentage is descriptive and its CI fields are blank.
+- `canonicity.png`: the resulting curve.
+- `samples.jsonl`: generated token ids, termination reason, and the Boolean
+  canonicity result at every eligible length.
+- `noncanonical_examples.jsonl`: bounded examples containing sampled and
+  canonical ids, decoded text, and the first differing position.
+- `metadata.json`: prompts, sampling settings, model revision, device, dtype,
+  and library versions.
+- `sampling_plan.json` and `sample_batches/`: immutable run identity and
+  transactionally committed batches used for exact resume.
+- `evaluation_manifest.json` and `segment_analysis_manifest.json`: hashes that
+  bind derived reports to the sampling plan and saved rollout source.
+- `rollout_segments.csv`: segment and non-canonical-prefix counts for every
+  rollout.
+- `segments.jsonl`: exact inclusive start/end positions for every segment.
+- `segment_count_distribution.csv`: per-context and pooled lifetime
+  segment-count distributions; compare cautiously because EOS changes observed
+  token exposure.
+- `recurrence.csv`: fixed-horizon contingency tables, descriptive pooled
+  probabilities, Mantel-Haenszel common odds ratios, exact conditional tests,
+  and ordinary plus log10 p-values.
+- `segment_definitions.json`: the machine-readable estimand and interpretation.
+
+Dense analysis can be rerun from saved token IDs without sampling again:
+
+```bash
+canonicity-segments \
+  --samples-file results/example/samples.jsonl \
+  --recurrence-horizons 128,256,512,1024,2048 \
+  --workers 4
+```
+
+Run the dependency-free unit tests with:
+
+```bash
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```

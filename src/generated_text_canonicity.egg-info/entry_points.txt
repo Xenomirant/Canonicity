@@ -1,0 +1,6 @@
+[console_scripts]
+canonicity = canonicity.cli:main
+canonicity-aggregate = canonicity.aggregate_cli:main
+canonicity-matrix = canonicity.matrix_cli:main
+canonicity-prompts = canonicity.dataset_cli:main
+canonicity-segments = canonicity.reanalyze_cli:main

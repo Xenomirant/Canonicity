@@ -1,0 +1,59 @@
+[experiment]
+name = "smoke-h100"
+seed = 42
+require_h100 = true
+models = ["llama3"]
+datasets = ["advbench"]
+attacks = ["canonical", "gcg", "autodan", "ffa", "advtok", "advtok_gcg", "advtok_autodan", "advtok_ffa"]
+limit = 2
+
+[models.llama3]
+repo = "meta-llama/Llama-3.2-1B-Instruct"
+revision = ""
+
+[models.gemma2]
+repo = "google/gemma-2-2b-it"
+revision = ""
+
+[models.olmo2]
+repo = "allenai/OLMo-2-1124-7B-Instruct"
+revision = ""
+
+[generation]
+num_return_sequences = 2
+batch_size = 2
+max_new_tokens = 64
+temperature = 1.0
+top_k = 0
+top_p = 1.0
+dtype = "bfloat16"
+attn_implementation = "sdpa"
+
+[advtok]
+num_steps = 3
+batch_size = 8
+max_neighbors = 8
+initialization = "random"
+early_stop = false
+
+[gcg]
+num_steps = 2
+search_width = 16
+topk = 16
+batch_size = 16
+use_prefix_cache = false
+
+[autodan]
+num_steps = 2
+batch_size = 8
+num_elites = 0.125
+crossover = 0.5
+num_points = 2
+iteration = 2
+mutation = 0.05
+seed = 20
+
+[strongreject]
+evaluator = "strongreject_rubric"
+judge_models = ["openai/gpt-4o-mini"]
+

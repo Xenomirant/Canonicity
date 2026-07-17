@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "generated-text-canonicity"
+version = "0.1.0"
+description = "Measure whether token sequences sampled by a language model are canonical tokenizations."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "accelerate>=1.0,<2",
+    "datasets>=4,<5",
+    "matplotlib>=3.7,<4",
+    "torch>=2.2",
+    "transformers>=4.57,<6",
+]
+
+[project.scripts]
+canonicity = "canonicity.cli:main"
+canonicity-aggregate = "canonicity.aggregate_cli:main"
+canonicity-matrix = "canonicity.matrix_cli:main"
+canonicity-prompts = "canonicity.dataset_cli:main"
+canonicity-segments = "canonicity.reanalyze_cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

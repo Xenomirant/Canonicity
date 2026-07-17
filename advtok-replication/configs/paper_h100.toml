@@ -1,0 +1,59 @@
+[experiment]
+name = "table1-paper-h100"
+seed = 42
+require_h100 = true
+models = ["llama3", "gemma2", "olmo2"]
+datasets = ["advbench", "maliciousinstruct", "masterkey"]
+attacks = ["canonical", "gcg", "autodan", "ffa", "advtok", "advtok_gcg", "advtok_autodan", "advtok_ffa"]
+limit = 0
+
+[models.llama3]
+repo = "meta-llama/Llama-3.2-1B-Instruct"
+revision = ""
+
+[models.gemma2]
+repo = "google/gemma-2-2b-it"
+revision = ""
+
+[models.olmo2]
+repo = "allenai/OLMo-2-1124-7B-Instruct"
+revision = ""
+
+[generation]
+num_return_sequences = 32
+batch_size = 32
+max_new_tokens = 256
+temperature = 1.0
+top_k = 0
+top_p = 1.0
+dtype = "bfloat16"
+attn_implementation = "sdpa"
+
+[advtok]
+num_steps = 100
+batch_size = 128
+max_neighbors = 128
+initialization = "random"
+early_stop = true
+
+[gcg]
+num_steps = 100
+search_width = 512
+topk = 256
+batch_size = 512
+use_prefix_cache = false
+
+[autodan]
+num_steps = 100
+batch_size = 256
+num_elites = 0.05
+crossover = 0.5
+num_points = 5
+iteration = 5
+mutation = 0.01
+seed = 20
+
+[strongreject]
+evaluator = "strongreject_rubric"
+judge_models = ["openai/gpt-4o-mini"]
+
