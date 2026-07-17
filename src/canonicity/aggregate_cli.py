@@ -82,6 +82,47 @@ def _job_paths(results_root: Path) -> Dict[Tuple[str, str], Path]:
     }
 
 
+def _validate_attention_provenance(
+    plan: Dict[str, Any],
+    alias: str,
+    path: Path,
+) -> None:
+    """Require one internally consistent, model-applicable attention backend."""
+
+    implementation = plan.get("attention_implementation")
+    provider = plan.get("attention_provider")
+    provider_version = plan.get("attention_provider_version")
+    attention_is_applicable = (
+        MODEL_SPECS[alias].default_attention_implementation != "not_applicable"
+    )
+
+    valid = False
+    if not attention_is_applicable:
+        valid = (
+            implementation == "not_applicable"
+            and provider == "not_applicable"
+            and provider_version is None
+        )
+    elif implementation == "flash_attention_2":
+        valid = (
+            provider == "flash-attn"
+            and isinstance(provider_version, str)
+            and bool(provider_version.strip())
+        )
+    elif implementation == "sdpa":
+        valid = (
+            provider == "torch"
+            and isinstance(provider_version, str)
+            and bool(provider_version.strip())
+            and provider_version == plan.get("torch_version")
+        )
+
+    if not valid:
+        raise ValueError(
+            f"invalid attention backend provenance for {alias}: {path}"
+        )
+
+
 def _validate_plan(
     path: Path,
     alias: str,
@@ -118,6 +159,7 @@ def _validate_plan(
         raise ValueError(f"matrix jobs require resolved runtime provenance: {path}")
     if plan["model_commit"] != plan["tokenizer_commit"]:
         raise ValueError(f"same-repository model/tokenizer commits differ: {path}")
+    _validate_attention_provenance(plan, alias, path)
 
     prompts = plan.get("prompts")
     expected_prompt_count = 1 if condition == "unconditional" else 100
@@ -554,6 +596,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     plan_fingerprints: Dict[str, str] = {}
     source_integrity: Dict[str, Any] = {}
     global_runtime_signature = None
+    global_attention_signature = None
     segment_definition_fingerprint = None
     observed_p_values = 0
 
@@ -623,6 +666,25 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         elif global_runtime_signature != runtime_signature:
             raise ValueError(f"software runtime changed within the matrix: {job_path}")
 
+        if plan["attention_implementation"] != "not_applicable":
+            attention_signature = _json_fingerprint(
+                {
+                    name: plan.get(name)
+                    for name in (
+                        "attention_implementation",
+                        "attention_provider",
+                        "attention_provider_version",
+                    )
+                }
+            )
+            if global_attention_signature is None:
+                global_attention_signature = attention_signature
+            elif global_attention_signature != attention_signature:
+                raise ValueError(
+                    "attention backend changed across Transformer models: "
+                    f"{job_path}"
+                )
+
         model_revision_signature = _json_fingerprint(
             {
                 name: plan.get(name)
@@ -634,6 +696,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                     "tokenizer_is_fast",
                     "resolved_parameter_dtypes",
                     "attention_implementation",
+                    "attention_provider",
+                    "attention_provider_version",
                     "requested_device",
                     "resolved_device",
                     "hardware_signature",
@@ -714,6 +778,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "tokenizer_is_fast",
             "resolved_parameter_dtypes",
             "attention_implementation",
+            "attention_provider",
+            "attention_provider_version",
             "requested_device",
             "resolved_device",
             "hardware_signature",

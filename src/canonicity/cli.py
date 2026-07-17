@@ -6,6 +6,7 @@ from typing import Optional, Sequence, Tuple
 
 from .core import evaluate_samples
 from .generation import (
+    ATTENTION_IMPLEMENTATIONS,
     GenerationSettings,
     load_prompt_file,
     prompts_from_arguments,
@@ -101,6 +102,15 @@ def _parser() -> argparse.ArgumentParser:
         "--dtype",
         choices=("auto", "float32", "float16", "bfloat16"),
         default="auto",
+    )
+    parser.add_argument(
+        "--attention-implementation",
+        choices=ATTENTION_IMPLEMENTATIONS,
+        required=True,
+        help=(
+            "Explicit text attention backend. Use flash_attention_2 or sdpa "
+            "for attention models, and not_applicable for attention-free models."
+        ),
     )
     parser.add_argument(
         "--prompt-mode",
@@ -213,6 +223,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         seed=args.seed,
         device=args.device,
         dtype=args.dtype,
+        attention_implementation=args.attention_implementation,
         prompt_mode=args.prompt_mode,
         device_map=args.device_map,
         tokenizer_revision=args.tokenizer_revision,

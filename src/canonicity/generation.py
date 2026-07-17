@@ -7,14 +7,22 @@ import re
 import time
 from collections import Counter
 from dataclasses import dataclass, field
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from packaging.version import InvalidVersion, Version
 
 from .core import SampledSequence, extract_continuation
 from .sample_store import SampleBatchStore
 
 
-SAMPLING_IMPLEMENTATION = "generated-text-canonicity/sampling-v2"
+SAMPLING_IMPLEMENTATION = "generated-text-canonicity/sampling-v3"
+ATTENTION_IMPLEMENTATIONS = (
+    "flash_attention_2",
+    "sdpa",
+    "not_applicable",
+)
 _FULL_COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
@@ -36,6 +44,7 @@ class GenerationSettings:
     seed: int
     device: str
     dtype: str
+    attention_implementation: str
     prompt_mode: str = "raw"
     device_map: Optional[str] = None
     tokenizer_revision: Optional[str] = None
@@ -124,6 +133,163 @@ def _resolve_dtype(torch: Any, requested: str, device: str) -> Any:
     if requested == "auto":
         return "auto"
     return getattr(torch, requested)
+
+
+def _validate_attention_applicability(
+    model_or_class: Any,
+    requested: str,
+) -> None:
+    """Reject an attention backend that does not match the architecture."""
+
+    if requested not in ATTENTION_IMPLEMENTATIONS:
+        raise ValueError(
+            "attention_implementation must be one of "
+            + ", ".join(ATTENTION_IMPLEMENTATIONS)
+        )
+    supports_attention = bool(
+        getattr(model_or_class, "_supports_attention_backend", False)
+    )
+    model_name = getattr(model_or_class, "__name__", type(model_or_class).__name__)
+    if requested == "not_applicable":
+        if supports_attention:
+            raise ValueError(
+                f"{model_name} uses attention; choose flash_attention_2 or sdpa"
+            )
+    elif not supports_attention:
+        raise ValueError(
+            f"{model_name} is attention-free; use "
+            "--attention-implementation not_applicable"
+        )
+
+
+def _attention_backend_provenance(
+    torch: Any,
+    transformers: Any,
+    requested: str,
+    device: str,
+    *,
+    distribution_version: Callable[[str], str] = importlib_metadata.version,
+) -> Dict[str, Any]:
+    """Resolve the exact provider without permitting an availability fallback."""
+
+    if requested == "not_applicable":
+        return {
+            "attention_provider": "not_applicable",
+            "attention_provider_version": None,
+        }
+    if requested == "sdpa":
+        return {
+            "attention_provider": "torch",
+            "attention_provider_version": str(torch.__version__),
+        }
+    if requested != "flash_attention_2":
+        raise ValueError(
+            "attention_implementation must be one of "
+            + ", ".join(ATTENTION_IMPLEMENTATIONS)
+        )
+    if not device.startswith("cuda") or not torch.cuda.is_available():
+        raise RuntimeError(
+            "flash_attention_2 requires CUDA model inference; "
+            f"resolved device is {device!r}"
+        )
+    try:
+        provider_version = distribution_version("flash-attn")
+    except importlib_metadata.PackageNotFoundError as error:
+        raise RuntimeError(
+            "flash_attention_2 requires the native `flash-attn` distribution; "
+            "install a CUDA-compatible build with "
+            "`python -m pip install flash-attn --no-build-isolation`. "
+            "No alternate kernel will be substituted."
+        ) from error
+    provider_is_current = False
+    if isinstance(provider_version, str):
+        try:
+            provider_is_current = Version(provider_version) >= Version("2.3.3")
+        except InvalidVersion:
+            pass
+    checker = getattr(transformers.utils, "is_flash_attn_2_available", None)
+    if not provider_is_current or checker is None or not checker():
+        raise RuntimeError(
+            "the installed native `flash-attn` provider "
+            f"({provider_version!r}) is not compatible with this Transformers, "
+            "PyTorch, or CUDA runtime (version 2.3.3 or newer is required); "
+            "no alternate kernel will be substituted"
+        )
+    return {
+        "attention_provider": "flash-attn",
+        "attention_provider_version": provider_version,
+    }
+
+
+def _active_attention_projection_parameters(
+    model: Any,
+    context_config: Any,
+) -> Tuple[Tuple[str, Any], ...]:
+    """Find Q/K/V weights used by the active text attention modules."""
+
+    parameters = []
+    for module_name, module in model.named_modules():
+        if getattr(module, "config", None) is not context_config:
+            continue
+        if not all(hasattr(module, name) for name in ("q_proj", "k_proj", "v_proj")):
+            continue
+        for projection_name in ("q_proj", "k_proj", "v_proj"):
+            weight = getattr(getattr(module, projection_name), "weight", None)
+            if weight is not None:
+                name = ".".join(
+                    part
+                    for part in (module_name, projection_name, "weight")
+                    if part
+                )
+                parameters.append((name, weight))
+    return tuple(parameters)
+
+
+def _validate_resolved_attention(model: Any, requested: str) -> str:
+    """Require the loaded text path to use exactly the requested backend."""
+
+    _validate_attention_applicability(model, requested)
+    if requested == "not_applicable":
+        return requested
+
+    context_config = getattr(model.config, "text_config", model.config)
+    resolved = getattr(context_config, "_attn_implementation", None)
+    if resolved != requested:
+        raise RuntimeError(
+            "attention backend changed during model loading: "
+            f"requested {requested!r}, resolved {resolved!r}; refusing fallback"
+        )
+    if requested == "flash_attention_2":
+        projections = _active_attention_projection_parameters(
+            model,
+            context_config,
+        )
+        if not projections:
+            raise RuntimeError(
+                "could not identify active text attention projections; "
+                "refusing to assume FlashAttention-2 placement is valid"
+            )
+        invalid_devices = [
+            f"{name}={weight.device}"
+            for name, weight in projections
+            if not str(weight.device).startswith("cuda")
+        ]
+        valid_dtypes = {"torch.float16", "torch.bfloat16"}
+        invalid_dtypes = [
+            f"{name}={weight.dtype}"
+            for name, weight in projections
+            if str(weight.dtype) not in valid_dtypes
+        ]
+        if invalid_devices or invalid_dtypes:
+            details = invalid_devices + invalid_dtypes
+            preview = ", ".join(details[:8])
+            if len(details) > 8:
+                preview += f", ... ({len(details)} violations total)"
+            raise RuntimeError(
+                "flash_attention_2 requires every active text Q/K/V projection "
+                f"on CUDA in float16 or bfloat16; {preview}"
+            )
+    return requested
 
 
 def _unconditional_input_id(model: Any, tokenizer: Any) -> int:
@@ -452,6 +618,16 @@ def generate_samples(
         raise ValueError("batch_size must be positive")
     if settings.prompt_mode not in {"raw", "chat"}:
         raise ValueError("prompt_mode must be raw or chat")
+    if settings.attention_implementation not in ATTENTION_IMPLEMENTATIONS:
+        raise ValueError(
+            "attention_implementation must be one of "
+            + ", ".join(ATTENTION_IMPLEMENTATIONS)
+        )
+    if (
+        settings.attention_implementation == "flash_attention_2"
+        and settings.dtype == "float32"
+    ):
+        raise ValueError("flash_attention_2 does not support float32 inference")
     if settings.device_map is not None and settings.device != "auto":
         raise ValueError(
             "device_map and an explicit device are mutually exclusive placement modes"
@@ -479,7 +655,8 @@ def generate_samples(
         f"{len(prompts)} contexts/prompts x "
         f"{settings.samples_per_context} rollouts = {total_samples} total; "
         f"max_new_tokens={settings.max_new_tokens}; "
-        f"batch_size={settings.batch_size}",
+        f"batch_size={settings.batch_size}; "
+        f"attention_implementation={settings.attention_implementation}",
         flush=True,
     )
     print(
@@ -504,21 +681,44 @@ def generate_samples(
     )
     print(
         f"Loading model with requested device={settings.device!r}, "
-        f"device_map={settings.device_map!r}, dtype={settings.dtype!r}...",
+        f"device_map={settings.device_map!r}, dtype={settings.dtype!r}, "
+        f"attention_implementation={settings.attention_implementation!r}...",
+        flush=True,
+    )
+    model_config = AutoConfig.from_pretrained(
+        settings.model_id,
+        revision=model_commit,
+    )
+    native_model_class = AutoModelForCausalLM._model_mapping[type(model_config)]
+    _validate_attention_applicability(
+        native_model_class,
+        settings.attention_implementation,
+    )
+    attention_provenance = _attention_backend_provenance(
+        torch,
+        transformers,
+        settings.attention_implementation,
+        device,
+    )
+    provider_version = attention_provenance["attention_provider_version"]
+    print(
+        "Attention backend preflight: "
+        f"implementation={settings.attention_implementation}; "
+        f"provider={attention_provenance['attention_provider']}; "
+        f"provider_version={provider_version or 'not_applicable'}; "
+        "fallback_allowed=false",
         flush=True,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_id,
         revision=tokenizer_commit,
     )
-    model_config = AutoConfig.from_pretrained(
-        settings.model_id,
-        revision=model_commit,
-    )
     model_kwargs = {
         "revision": model_commit,
         "dtype": dtype,
     }
+    if settings.attention_implementation != "not_applicable":
+        model_kwargs["attn_implementation"] = settings.attention_implementation
     if settings.device_map is not None:
         model_kwargs["device_map"] = settings.device_map
     model = _load_model_exact(
@@ -554,6 +754,11 @@ def generate_samples(
     )
     placement_summary = _placement_summary(parameter_footprint, resolved_device_map)
     hardware_signature = _hardware_signature(torch, device)
+    context_config = getattr(model.config, "text_config", model.config)
+    attention_implementation = _validate_resolved_attention(
+        model,
+        settings.attention_implementation,
+    )
     print(
         "Sampling placement: "
         f"actual_model_placement={placement_summary}; "
@@ -562,12 +767,11 @@ def generate_samples(
         f"input_device={input_device}; "
         f"parameter_footprint_by_device={json.dumps(parameter_footprint)}; "
         f"device_map_modules={mapped_module_counts or 'none'}; "
-        f"parameter_dtypes={parameter_dtypes}",
+        f"parameter_dtypes={parameter_dtypes}; "
+        f"attention_implementation={attention_implementation}; "
+        f"attention_provider={attention_provenance['attention_provider']}; "
+        f"attention_provider_version={provider_version or 'not_applicable'}",
         flush=True,
-    )
-    context_config = getattr(model.config, "text_config", model.config)
-    attention_implementation = getattr(
-        context_config, "_attn_implementation", None
     )
     context_window = _context_window(context_config)
     prepared_contexts = []
@@ -653,6 +857,7 @@ def generate_samples(
             "requested_dtype": settings.dtype,
             "resolved_parameter_dtypes": parameter_dtypes,
             "attention_implementation": attention_implementation,
+            **attention_provenance,
             "eos_token_ids": sorted(terminal_ids),
             "unconditional_seed_is_evaluated": False,
             "prompt_tokens_are_evaluated": False,
@@ -873,6 +1078,7 @@ def generate_samples(
         "requested_dtype": settings.dtype,
         "resolved_parameter_dtypes": parameter_dtypes,
         "attention_implementation": attention_implementation,
+        **attention_provenance,
         "model_commit": model_commit,
         "tokenizer_commit": tokenizer_commit,
         "model_config_type": type(model.config).__name__,

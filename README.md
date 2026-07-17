@@ -135,11 +135,44 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+### Native FlashAttention-2 on remote CUDA hosts
+
+FlashAttention is deliberately not a base project dependency: installing the
+project must remain possible on CPU and macOS hosts. For the four Transformer
+models in the primary matrix, install the native package separately after a
+CUDA-enabled PyTorch build and the project dependencies are installed:
+
+```bash
+python -m pip install -U packaging psutil ninja
+MAX_JOBS=4 python -m pip install -U flash-attn --no-build-isolation
+```
+
+The current upstream NVIDIA requirements are Linux, PyTorch 2.2 or newer, a
+CUDA 12.0 or newer toolkit, and an Ampere, Ada, or Hopper GPU. Native
+FlashAttention-2 accepts FP16 and BF16 attention inputs and head dimensions up
+to 256; see the
+[official installation and hardware requirements](https://github.com/Dao-AILab/flash-attention#installation-and-features).
+`MAX_JOBS=4` limits compilation memory use and may be increased or omitted on a
+large build host.
+
+`--attention-implementation flash_attention_2` means the native `flash-attn`
+provider exactly, version 2.3.3 or newer. The runner verifies the installed
+distribution and resolved backend and does not silently substitute SDPA, eager
+attention, or a downloaded kernel. The attention layers used for generation
+must reside on compatible CUDA GPU(s); CPU or disk offload of an executing
+attention layer is not a working FlashAttention-2 configuration. Choose
+`--attention-implementation sdpa` explicitly when SDPA is the intended
+experimental condition. Mamba has no attention mechanism, so its only honest
+setting is `--attention-implementation not_applicable`. Direct `canonicity`
+commands intentionally have no attention default: every sampling invocation
+must state this flag.
+
 The smallest paper model is the public Mamba checkpoint:
 
 ```bash
 canonicity \
   --model state-spaces/mamba-130m-hf \
+  --attention-implementation not_applicable \
   --samples 256 \
   --lengths 1:128 \
   --batch-size 32 \
@@ -151,8 +184,8 @@ The other paper checkpoints can be run in the same way (they may require a
 Hugging Face account with access):
 
 ```bash
-canonicity --model google/gemma-2b --output results/rerun-gemma-2b
-canonicity --model meta-llama/Llama-2-7b-hf --output results/rerun-llama2-7b
+canonicity --model google/gemma-2b --attention-implementation flash_attention_2 --output results/rerun-gemma-2b
+canonicity --model meta-llama/Llama-2-7b-hf --attention-implementation flash_attention_2 --output results/rerun-llama2-7b
 ```
 
 Sampling is deliberately untruncated: `do_sample=True`, temperature 1,
@@ -164,25 +197,45 @@ condition. All settings and resolved library/model revisions are recorded in
 the run before sampling.
 
 The checked-in Mamba result directories predate transactional sampling plans
-and are deliberately not treated as resumable. Use a new output directory for
-a new sampling run, as in the commands above.
+and are deliberately not treated as resumable. New runs use sampling-plan
+schema `generated-text-canonicity/sampling-v3`. Plans created by sampling-v2
+cannot resume under sampling-v3 because they do not bind the strict attention
+provider provenance; use a new output directory. Saved rollout files can still
+be analyzed offline.
 
 ### Five-model experiment matrix
 
 The matrix runner contains the exact requested checkpoints:
 
-| alias | Hugging Face checkpoint |
-|---|---|
-| `gemma3-4b-it` | `google/gemma-3-4b-it` |
-| `qwen3-30b-a3b-instruct-2507` | `Qwen/Qwen3-30B-A3B-Instruct-2507` |
-| `gemma-2b-it` | `google/gemma-2b-it` |
-| `llama2-7b` | `meta-llama/Llama-2-7b-hf` |
-| `mamba-130m` | `state-spaces/mamba-130m-hf` |
+| alias | Hugging Face checkpoint | matrix attention implementation |
+|---|---|---|
+| `gemma3-4b-it` | `google/gemma-3-4b-it` | `flash_attention_2` |
+| `qwen3-30b-a3b-instruct-2507` | `Qwen/Qwen3-30B-A3B-Instruct-2507` | `flash_attention_2` |
+| `gemma-2b-it` | `google/gemma-2b-it` | `flash_attention_2` |
+| `llama2-7b` | `meta-llama/Llama-2-7b-hf` | `flash_attention_2` |
+| `mamba-130m` | `state-spaces/mamba-130m-hf` | `not_applicable` |
 
 `google/gemma-2b-it` is the original Gemma 1 instruction-tuned 2B checkpoint.
 If “Gemma-2B-it” was intended to mean Gemma 2, use
 `google/gemma-2-2b-it` as a separate model condition rather than silently
 changing the checkpoint.
+
+These are fixed model-spec defaults, not an automatic hardware-dependent
+choice. A missing or unusable native FlashAttention-2 installation stops a
+Transformer job. To run an explicit SDPA condition, override a Transformer job
+and give it a distinct output root:
+
+```bash
+canonicity-matrix \
+  --model llama2-7b \
+  --condition unconditional \
+  --attention-implementation sdpa \
+  --output-root results/model-matrix-sdpa
+```
+
+There is no FlashAttention-to-SDPA fallback. Mamba remains
+`not_applicable`, because selecting an attention kernel for an attention-free
+architecture would misdescribe the experiment.
 
 Preview every unconditional job without loading weights:
 
@@ -212,10 +265,11 @@ million generated tokens, so schedule it one model/condition at a time.
 All contexts are tokenized and context-window-validated before batch zero.
 Sampling is then transactionally committed after every batch using a run plan
 bound to resolved model/tokenizer commits, tokenizer/runtime implementation,
-precision, attention backend, hardware placement, rendered input lengths,
-prompts, and settings. Re-running the same command resumes completed batches;
-any mismatch fails rather than mixing experiments. Use only one writer per job
-directory.
+precision, attention implementation and native provider version, hardware
+placement, rendered input lengths, prompts, and settings. Re-running the same
+command resumes completed batches; any mismatch fails rather than mixing
+experiments. Changing the attention implementation or native package version
+requires a new output directory. Use only one writer per job directory.
 
 Runtime output is flushed immediately for scheduler logs. Before sampling it
 prints the full workload and the model's **actual** placement, for example
@@ -269,6 +323,7 @@ Repeat `--prompt` to report each context separately:
 ```bash
 canonicity \
   --model state-spaces/mamba-130m-hf \
+  --attention-implementation not_applicable \
   --prompt "Once upon a time" \
   --prompt "def fibonacci(n):" \
   --output results/mamba-prompted
@@ -298,6 +353,7 @@ early curve. The endpoint is always included:
 ```bash
 canonicity \
   --model state-spaces/mamba-130m-hf \
+  --attention-implementation not_applicable \
   --samples 64 \
   --lengths 1:128,256:2048:128 \
   --batch-size 32 \
@@ -322,6 +378,7 @@ Then sample long continuations conditioned on those contexts:
 ```bash
 canonicity \
   --model state-spaces/mamba-130m-hf \
+  --attention-implementation not_applicable \
   --prompts-file prompts/wikitext-2-test-mamba-1024.jsonl \
   --samples 16 \
   --lengths 1:128,256:1024:128 \
@@ -352,7 +409,8 @@ Exact recipes and resource constraints for Gemma 3 and Qwen are in
 - `noncanonical_examples.jsonl`: bounded examples containing sampled and
   canonical ids, decoded text, and the first differing position.
 - `metadata.json`: prompts, sampling settings, model revision, device, dtype,
-  and library versions.
+  resolved attention implementation, native provider/version, and library
+  versions.
 - `sampling_plan.json` and `sample_batches/`: immutable run identity and
   transactionally committed batches used for exact resume.
 - `evaluation_manifest.json` and `segment_analysis_manifest.json`: hashes that
@@ -377,7 +435,7 @@ canonicity-segments \
   --workers 4
 ```
 
-Run the dependency-free unit tests with:
+Run the offline unit tests with:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v

@@ -12,6 +12,7 @@ dependencies = [
     "accelerate>=1.0,<2",
     "datasets>=4,<5",
     "matplotlib>=3.7,<4",
+    "packaging>=23",
     "torch>=2.2",
     "transformers>=4.57,<6",
 ]

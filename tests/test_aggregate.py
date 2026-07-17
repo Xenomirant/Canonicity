@@ -5,7 +5,12 @@ import unittest
 from dataclasses import asdict
 from pathlib import Path
 
-from canonicity.aggregate_cli import _expected_summaries, _sha256, main
+from canonicity.aggregate_cli import (
+    _expected_summaries,
+    _sha256,
+    _validate_attention_provenance,
+    main,
+)
 from canonicity.core import CANONICITY_EVALUATION_IMPLEMENTATION
 from canonicity.generation import SAMPLING_IMPLEMENTATION
 from canonicity.matrix_cli import (
@@ -63,7 +68,8 @@ def make_rollout(context_id, sample_index):
     )
 
 
-def make_matrix(root):
+def make_matrix(root, attention_overrides=None):
+    attention_overrides = attention_overrides or {}
     prompted = [
         {"id": f"prompt-{index:03d}", "text": f"text {index}", "metadata": {}}
         for index in range(100)
@@ -78,6 +84,19 @@ def make_matrix(root):
                 else prompted
             )
             samples_per_context = 32 if condition == "unconditional" else 64
+            attention_implementation = attention_overrides.get(
+                alias,
+                spec.default_attention_implementation,
+            )
+            if attention_implementation == "flash_attention_2":
+                attention_provider = "flash-attn"
+                attention_provider_version = "test-flash-attn"
+            elif attention_implementation == "sdpa":
+                attention_provider = "torch"
+                attention_provider_version = "test-torch"
+            else:
+                attention_provider = "not_applicable"
+                attention_provider_version = None
             plan = {
                 "sampling_implementation": SAMPLING_IMPLEMENTATION,
                 "transformers_version": "test-transformers",
@@ -94,7 +113,9 @@ def make_matrix(root):
                 "model_commit": f"{alias}-commit",
                 "tokenizer_commit": f"{alias}-commit",
                 "resolved_parameter_dtypes": ["test-dtype"],
-                "attention_implementation": "test-attention",
+                "attention_implementation": attention_implementation,
+                "attention_provider": attention_provider,
+                "attention_provider_version": attention_provider_version,
                 "unconditional_seed_is_evaluated": False,
                 "prompt_tokens_are_evaluated": False,
                 "other_sampled_special_tokens_are_evaluated": True,
@@ -212,6 +233,8 @@ def make_matrix(root):
                 "tokenizer_is_fast",
                 "resolved_parameter_dtypes",
                 "attention_implementation",
+                "attention_provider",
+                "attention_provider_version",
                 "requested_device",
                 "resolved_device",
                 "hardware_signature",
@@ -256,6 +279,95 @@ def make_matrix(root):
 
 
 class AggregateTests(unittest.TestCase):
+    def test_attention_provenance_accepts_each_declared_backend(self):
+        cases = (
+            (
+                "gemma3-4b-it",
+                {
+                    "torch_version": "2.10.0",
+                    "attention_implementation": "flash_attention_2",
+                    "attention_provider": "flash-attn",
+                    "attention_provider_version": "2.8.3",
+                },
+            ),
+            (
+                "gemma3-4b-it",
+                {
+                    "torch_version": "2.10.0",
+                    "attention_implementation": "sdpa",
+                    "attention_provider": "torch",
+                    "attention_provider_version": "2.10.0",
+                },
+            ),
+            (
+                "mamba-130m",
+                {
+                    "torch_version": "2.10.0",
+                    "attention_implementation": "not_applicable",
+                    "attention_provider": "not_applicable",
+                    "attention_provider_version": None,
+                },
+            ),
+        )
+
+        for alias, plan in cases:
+            with self.subTest(alias=alias, backend=plan["attention_implementation"]):
+                _validate_attention_provenance(plan, alias, Path("job"))
+
+    def test_attention_provenance_rejects_inconsistent_combinations(self):
+        cases = (
+            (
+                "gemma3-4b-it",
+                {
+                    "torch_version": "2.10.0",
+                    "attention_implementation": "flash_attention_2",
+                    "attention_provider": "torch",
+                    "attention_provider_version": "2.10.0",
+                },
+            ),
+            (
+                "gemma3-4b-it",
+                {
+                    "torch_version": "2.10.0",
+                    "attention_implementation": "flash_attention_2",
+                    "attention_provider": "flash-attn",
+                    "attention_provider_version": " ",
+                },
+            ),
+            (
+                "gemma3-4b-it",
+                {
+                    "torch_version": "2.10.0",
+                    "attention_implementation": "sdpa",
+                    "attention_provider": "torch",
+                    "attention_provider_version": "2.9.0",
+                },
+            ),
+            (
+                "gemma3-4b-it",
+                {
+                    "torch_version": "2.10.0",
+                    "attention_implementation": "not_applicable",
+                    "attention_provider": "not_applicable",
+                    "attention_provider_version": None,
+                },
+            ),
+            (
+                "mamba-130m",
+                {
+                    "torch_version": "2.10.0",
+                    "attention_implementation": "sdpa",
+                    "attention_provider": "torch",
+                    "attention_provider_version": "2.10.0",
+                },
+            ),
+        )
+
+        for alias, plan in cases:
+            with self.subTest(alias=alias, plan=plan):
+                with self.assertRaises(ValueError):
+                    _validate_attention_provenance(plan, alias, Path("job"))
+
     def test_complete_family_is_recomputed_and_log_adjusted(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "matrix"
@@ -292,6 +404,17 @@ class AggregateTests(unittest.TestCase):
             (root / "mamba-130m" / "wikitext" / "recurrence.csv").unlink()
 
             with self.assertRaises(SystemExit):
+                main(["--results-root", str(root)])
+
+    def test_mixed_transformer_attention_backends_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "matrix"
+            make_matrix(root, {"llama2-7b": "sdpa"})
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "attention backend changed across Transformer models",
+            ):
                 main(["--results-root", str(root)])
 
     def test_modified_recurrence_is_rejected_even_if_schema_is_valid(self):

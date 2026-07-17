@@ -1,9 +1,11 @@
 import unittest
+from importlib import metadata as importlib_metadata
 
 from canonicity.core import SampledSequence
 from canonicity.generation import (
     GenerationSettings,
     PromptContext,
+    _attention_backend_provenance,
     _eos_token_ids,
     _hardware_signature,
     _load_model_exact,
@@ -14,6 +16,8 @@ from canonicity.generation import (
     _resolve_dtype,
     _scan_checkpointed_batches,
     _sampling_progress_message,
+    _validate_attention_applicability,
+    _validate_resolved_attention,
     generate_samples,
 )
 
@@ -28,6 +32,172 @@ class _ReportedMps:
     @staticmethod
     def is_available():
         return True
+
+
+class AttentionBackendTests(unittest.TestCase):
+    @staticmethod
+    def _torch(cuda_available=True):
+        cuda = type(
+            "Cuda",
+            (),
+            {"is_available": staticmethod(lambda: cuda_available)},
+        )()
+        return type("Torch", (), {"__version__": "2.8.0", "cuda": cuda})()
+
+    @staticmethod
+    def _transformers(available=True):
+        utils = type(
+            "Utils",
+            (),
+            {"is_flash_attn_2_available": staticmethod(lambda: available)},
+        )()
+        return type("Transformers", (), {"utils": utils})()
+
+    def test_not_applicable_has_no_attention_provider(self):
+        provenance = _attention_backend_provenance(
+            object(),
+            object(),
+            "not_applicable",
+            "cpu",
+        )
+
+        self.assertEqual(provenance["attention_provider"], "not_applicable")
+        self.assertIsNone(provenance["attention_provider_version"])
+
+    def test_sdpa_is_bound_to_the_torch_version(self):
+        provenance = _attention_backend_provenance(
+            self._torch(),
+            object(),
+            "sdpa",
+            "cuda:0",
+        )
+
+        self.assertEqual(provenance["attention_provider"], "torch")
+        self.assertEqual(provenance["attention_provider_version"], "2.8.0")
+
+    def test_native_flash_attention_provider_is_recorded(self):
+        provenance = _attention_backend_provenance(
+            self._torch(),
+            self._transformers(),
+            "flash_attention_2",
+            "cuda:0",
+            distribution_version=lambda name: "2.8.3",
+        )
+
+        self.assertEqual(provenance["attention_provider"], "flash-attn")
+        self.assertEqual(provenance["attention_provider_version"], "2.8.3")
+
+    def test_flash_attention_never_uses_an_alternate_provider(self):
+        def missing_distribution(name):
+            raise importlib_metadata.PackageNotFoundError(name)
+
+        with self.assertRaisesRegex(RuntimeError, "No alternate kernel"):
+            _attention_backend_provenance(
+                self._torch(),
+                self._transformers(),
+                "flash_attention_2",
+                "cuda:0",
+                distribution_version=missing_distribution,
+            )
+
+    def test_incompatible_native_flash_attention_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "not compatible"):
+            _attention_backend_provenance(
+                self._torch(),
+                self._transformers(available=True),
+                "flash_attention_2",
+                "cuda:0",
+                distribution_version=lambda name: "2.2.0",
+            )
+
+    def test_flash_attention_rejects_cpu_inference(self):
+        with self.assertRaisesRegex(RuntimeError, "requires CUDA"):
+            _attention_backend_provenance(
+                self._torch(cuda_available=False),
+                self._transformers(),
+                "flash_attention_2",
+                "cpu",
+                distribution_version=lambda name: "2.8.3",
+            )
+
+    def test_attention_applicability_is_architectural(self):
+        attention_model = type(
+            "AttentionModel",
+            (),
+            {"_supports_attention_backend": True},
+        )
+        attention_free_model = type(
+            "AttentionFreeModel",
+            (),
+            {"_supports_attention_backend": False},
+        )
+
+        _validate_attention_applicability(attention_model, "sdpa")
+        _validate_attention_applicability(
+            attention_free_model,
+            "not_applicable",
+        )
+        with self.assertRaisesRegex(ValueError, "uses attention"):
+            _validate_attention_applicability(
+                attention_model,
+                "not_applicable",
+            )
+        with self.assertRaisesRegex(ValueError, "attention-free"):
+            _validate_attention_applicability(
+                attention_free_model,
+                "flash_attention_2",
+            )
+
+    def test_loaded_flash_attention_must_match_and_be_cuda_half_precision(self):
+        config = type(
+            "Config",
+            (),
+            {"_attn_implementation": "flash_attention_2"},
+        )()
+
+        class Weight:
+            device = "cuda:1"
+            dtype = "torch.bfloat16"
+
+        projection = type("Projection", (), {"weight": Weight()})()
+        attention = type(
+            "Attention",
+            (),
+            {
+                "config": config,
+                "q_proj": projection,
+                "k_proj": projection,
+                "v_proj": projection,
+            },
+        )()
+        model = type(
+            "Model",
+            (),
+            {
+                "_supports_attention_backend": True,
+                "config": config,
+                "named_modules": lambda self: iter((("layer.attn", attention),)),
+            },
+        )()
+
+        self.assertEqual(
+            _validate_resolved_attention(model, "flash_attention_2"),
+            "flash_attention_2",
+        )
+
+    def test_loaded_attention_fallback_is_rejected(self):
+        config = type("Config", (), {"_attn_implementation": "sdpa"})()
+        model = type(
+            "Model",
+            (),
+            {
+                "_supports_attention_backend": True,
+                "config": config,
+            },
+        )()
+
+        with self.assertRaisesRegex(RuntimeError, "refusing fallback"):
+            _validate_resolved_attention(model, "flash_attention_2")
 
 
 class DeviceResolutionTests(unittest.TestCase):
@@ -79,10 +249,19 @@ class DeviceResolutionTests(unittest.TestCase):
                 seen.update({"model_id": model_id, **kwargs})
                 return "model", {}
 
-        model = _load_model_exact(Loader, "example/model", composite, {"dtype": "auto"})
+        model = _load_model_exact(
+            Loader,
+            "example/model",
+            composite,
+            {
+                "dtype": "auto",
+                "attn_implementation": "flash_attention_2",
+            },
+        )
 
         self.assertEqual(model, "model")
         self.assertIs(seen["config"], composite)
+        self.assertEqual(seen["attn_implementation"], "flash_attention_2")
         self.assertTrue(seen["output_loading_info"])
 
     def test_incomplete_weight_load_is_rejected(self):
@@ -300,6 +479,7 @@ class DeviceResolutionTests(unittest.TestCase):
             seed=0,
             device="cuda:1",
             dtype="auto",
+            attention_implementation="sdpa",
             device_map="auto",
         )
 

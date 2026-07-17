@@ -18,6 +18,7 @@ class ModelSpec:
     model_id: str
     default_dtype: str
     default_batch_size: int
+    default_attention_implementation: str
     default_device_map: Optional[str] = None
 
 
@@ -27,12 +28,14 @@ MODEL_SPECS: Dict[str, ModelSpec] = {
         model_id="google/gemma-3-4b-it",
         default_dtype="auto",
         default_batch_size=1,
+        default_attention_implementation="flash_attention_2",
     ),
     "qwen3-30b-a3b-instruct-2507": ModelSpec(
         alias="qwen3-30b-a3b-instruct-2507",
         model_id="Qwen/Qwen3-30B-A3B-Instruct-2507",
         default_dtype="auto",
         default_batch_size=1,
+        default_attention_implementation="flash_attention_2",
         default_device_map="auto",
     ),
     "gemma-2b-it": ModelSpec(
@@ -40,18 +43,21 @@ MODEL_SPECS: Dict[str, ModelSpec] = {
         model_id="google/gemma-2b-it",
         default_dtype="auto",
         default_batch_size=1,
+        default_attention_implementation="flash_attention_2",
     ),
     "llama2-7b": ModelSpec(
         alias="llama2-7b",
         model_id="meta-llama/Llama-2-7b-hf",
         default_dtype="auto",
         default_batch_size=1,
+        default_attention_implementation="flash_attention_2",
     ),
     "mamba-130m": ModelSpec(
         alias="mamba-130m",
         model_id="state-spaces/mamba-130m-hf",
         default_dtype="auto",
         default_batch_size=32,
+        default_attention_implementation="not_applicable",
     ),
 }
 
@@ -64,6 +70,15 @@ WORKSPACE_PROMPTS_FILE = (
     / "prompts"
     / "wikitext-2-train-articles-mamba-1024-100.jsonl"
 )
+
+
+def _effective_attention_implementation(
+    args: argparse.Namespace,
+    spec: ModelSpec,
+) -> str:
+    if spec.default_attention_implementation == "not_applicable":
+        return spec.default_attention_implementation
+    return args.attention_implementation or spec.default_attention_implementation
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -129,6 +144,11 @@ def _parser() -> argparse.ArgumentParser:
         "--dtype", choices=("auto", "float32", "float16", "bfloat16")
     )
     parser.add_argument(
+        "--attention-implementation",
+        choices=("flash_attention_2", "sdpa"),
+        help="Override the backend for selected attention-based models",
+    )
+    parser.add_argument(
         "--output-root", type=Path, default=Path("results/model-matrix")
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -151,6 +171,7 @@ def _command(
         if condition == "unconditional"
         else args.prompt_rollouts
     )
+    attention_implementation = _effective_attention_implementation(args, spec)
     command = [
         sys.executable,
         "-m",
@@ -169,6 +190,8 @@ def _command(
         args.device,
         "--dtype",
         dtype,
+        "--attention-implementation",
+        attention_implementation,
         "--segment-analysis",
         "--segment-workers",
         str(args.segment_workers),
@@ -243,6 +266,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             )
 
     aliases = tuple(MODEL_SPECS) if args.all_models else tuple(args.model)
+    if args.attention_implementation is not None and all(
+        MODEL_SPECS[alias].default_attention_implementation == "not_applicable"
+        for alias in aliases
+    ):
+        raise SystemExit(
+            "--attention-implementation cannot override models without attention"
+        )
     unused_revisions = set(args.model_revisions) - set(aliases)
     if unused_revisions:
         raise SystemExit(
@@ -270,6 +300,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     for job_position, (spec, condition) in enumerate(jobs, start=1):
         command, output = _command(args, spec, condition)
+        attention_implementation = _effective_attention_implementation(args, spec)
         if (
             output.exists()
             and any(output.iterdir())
@@ -288,6 +319,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         print(
             f"Matrix job {job_position}/{len(jobs)}: model={spec.alias}; "
             f"condition={condition}; contexts/prompts={context_count}; "
+            f"attention_implementation={attention_implementation}; "
             f"rollouts_per_context={rollouts_per_context}; "
             f"total_rollouts={context_count * rollouts_per_context}; "
             f"jobs_after_this={len(jobs) - job_position}",

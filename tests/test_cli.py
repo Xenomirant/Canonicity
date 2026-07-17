@@ -76,6 +76,105 @@ class LengthParsingTests(unittest.TestCase):
         self.assertIn("rollouts_per_context=17", output)
         self.assertIn("total_rollouts=17", output)
 
+    def test_matrix_mamba_backend_is_explicitly_not_applicable(self):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            matrix_main(
+                [
+                    "--model",
+                    "mamba-130m",
+                    "--condition",
+                    "unconditional",
+                    "--dry-run",
+                ]
+            )
+
+        output = stdout.getvalue()
+        self.assertIn("attention_implementation=not_applicable", output)
+        self.assertIn(
+            "--attention-implementation not_applicable",
+            output,
+        )
+
+    def test_matrix_transformer_defaults_to_flash_attention_2(self):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            matrix_main(
+                [
+                    "--model",
+                    "gemma3-4b-it",
+                    "--condition",
+                    "unconditional",
+                    "--dry-run",
+                ]
+            )
+
+        output = stdout.getvalue()
+        self.assertIn("attention_implementation=flash_attention_2", output)
+        self.assertIn(
+            "--attention-implementation flash_attention_2",
+            output,
+        )
+
+    def test_matrix_sdpa_overrides_transformer_default(self):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            matrix_main(
+                [
+                    "--model",
+                    "llama2-7b",
+                    "--condition",
+                    "unconditional",
+                    "--attention-implementation",
+                    "sdpa",
+                    "--dry-run",
+                ]
+            )
+
+        output = stdout.getvalue()
+        self.assertIn("attention_implementation=sdpa", output)
+        self.assertIn("--attention-implementation sdpa", output)
+        self.assertNotIn("--attention-implementation flash_attention_2", output)
+
+    def test_matrix_attention_override_leaves_mamba_not_applicable(self):
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            matrix_main(
+                [
+                    "--model",
+                    "llama2-7b",
+                    "--model",
+                    "mamba-130m",
+                    "--condition",
+                    "unconditional",
+                    "--attention-implementation",
+                    "sdpa",
+                    "--dry-run",
+                ]
+            )
+
+        output = stdout.getvalue()
+        self.assertIn("attention_implementation=sdpa", output)
+        self.assertIn("attention_implementation=not_applicable", output)
+        self.assertIn("--attention-implementation not_applicable", output)
+
+    def test_matrix_rejects_attention_override_for_mamba_only(self):
+        with self.assertRaisesRegex(
+            SystemExit,
+            "cannot override models without attention",
+        ):
+            matrix_main(
+                [
+                    "--model",
+                    "mamba-130m",
+                    "--condition",
+                    "unconditional",
+                    "--attention-implementation",
+                    "sdpa",
+                    "--dry-run",
+                ]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
