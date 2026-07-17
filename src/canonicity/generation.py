@@ -4,9 +4,11 @@ import hashlib
 import json
 import platform
 import re
+import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .core import SampledSequence, extract_continuation
 from .sample_store import SampleBatchStore
@@ -231,6 +233,150 @@ def _resolve_repo_commit(hf_api: Any, repo_id: str, revision: Optional[str]) -> 
     return commit.lower()
 
 
+def _sampling_progress_message(
+    *,
+    context_position: int,
+    context_count: int,
+    context_id: str,
+    context_completed: int,
+    samples_per_context: int,
+    total_completed: int,
+    total_samples: int,
+    unfinished_contexts: int,
+    sampled_this_invocation: int,
+) -> str:
+    """Format one append-only progress line for scheduler logs."""
+
+    remaining_samples = total_samples - total_completed
+    percentage = 100.0 * total_completed / total_samples
+    return (
+        "Sampling progress: "
+        f"context {context_position + 1}/{context_count} {context_id!r}; "
+        f"{context_completed}/{samples_per_context} completed in context; "
+        f"{total_completed}/{total_samples} completed overall ({percentage:.1f}%); "
+        f"{remaining_samples} rollouts still require model sampling; "
+        f"{unfinished_contexts} unfinished contexts/prompts; "
+        f"{sampled_this_invocation} sampled this invocation"
+    )
+
+
+def _parameter_footprint_by_device(model: Any) -> Dict[str, Dict[str, int]]:
+    """Summarize logical and resident parameter bytes by reported device."""
+
+    footprint: Dict[str, Dict[str, int]] = {}
+    for parameter in model.parameters():
+        device = str(parameter.device)
+        row = footprint.setdefault(
+            device,
+            {
+                "tensors": 0,
+                "parameters": 0,
+                "logical_bytes": 0,
+                "resident_bytes": 0,
+            },
+        )
+        parameter_count = int(parameter.numel())
+        logical_bytes = parameter_count * int(parameter.element_size())
+        row["tensors"] += 1
+        row["parameters"] += parameter_count
+        row["logical_bytes"] += logical_bytes
+        if device.split(":", 1)[0] != "meta":
+            row["resident_bytes"] += logical_bytes
+    return dict(sorted(footprint.items()))
+
+
+def _placement_summary(
+    parameter_footprint: Mapping[str, Any],
+    resolved_device_map: Mapping[str, Any],
+) -> str:
+    """Describe actual accelerator, CPU, and offload placement plainly."""
+
+    locations = {str(location).lower() for location in parameter_footprint}
+    locations.update(str(location).lower() for location in resolved_device_map.values())
+
+    uses_cuda = any(
+        location == "cuda"
+        or location.startswith("cuda:")
+        or location.isdigit()
+        for location in locations
+    )
+    uses_mps = any(
+        location == "mps" or location.startswith("mps:")
+        for location in locations
+    )
+    uses_cpu = "cpu" in locations
+    uses_disk = "disk" in locations
+    uses_meta = "meta" in locations
+
+    components = []
+    if uses_cuda:
+        components.append("GPU (CUDA)")
+    if uses_mps:
+        components.append("GPU (MPS)")
+    if uses_cpu:
+        components.append("CPU")
+    if uses_disk:
+        components.append("disk offload")
+    if uses_meta and not uses_disk:
+        components.append("offloaded/meta tensors")
+
+    recognized = {
+        location
+        for location in locations
+        if location in {"cpu", "mps", "disk", "meta", "cuda"}
+        or location.startswith(("cuda:", "mps:"))
+        or location.isdigit()
+    }
+    components.extend(sorted(locations - recognized))
+    return " + ".join(components) if components else "unknown"
+
+
+def _scan_checkpointed_batches(
+    store: SampleBatchStore,
+    prompts: Sequence[PromptContext],
+    samples_per_context: int,
+    batch_size: int,
+    *,
+    progress: Optional[Callable[[int, int, int], None]] = None,
+) -> Tuple[
+    Dict[Tuple[int, int], Tuple[SampledSequence, ...]],
+    Tuple[int, ...],
+]:
+    """Validate expected batch slots and count work already durably complete."""
+
+    batch_slots_per_context = (
+        samples_per_context + batch_size - 1
+    ) // batch_size
+    total_slots = len(prompts) * batch_slots_per_context
+    completed_batches = {}
+    completed_by_context = [0 for _ in prompts]
+    completed_rollouts = 0
+    scanned_slots = 0
+
+    for context_position, prompt in enumerate(prompts):
+        for start in range(0, samples_per_context, batch_size):
+            expected_count = min(batch_size, samples_per_context - start)
+            completed = store.load_batch(
+                context_position,
+                prompt.context_id,
+                start,
+                expected_count,
+            )
+            if completed is not None:
+                completed_batches[(context_position, start)] = completed
+                completed_by_context[context_position] += expected_count
+                completed_rollouts += expected_count
+            scanned_slots += 1
+            if progress is not None:
+                progress(
+                    scanned_slots,
+                    total_slots,
+                    completed_rollouts,
+                )
+
+    return completed_batches, tuple(completed_by_context)
+
+
 def _load_model_exact(
     auto_model_class: Any,
     model_id: str,
@@ -327,6 +473,20 @@ def generate_samples(
     device = _resolve_device(torch, settings.device)
     dtype = _resolve_dtype(torch, settings.dtype, device)
     tokenizer_id = settings.tokenizer_id or settings.model_id
+    total_samples = len(prompts) * settings.samples_per_context
+    print(
+        "Sampling plan: "
+        f"{len(prompts)} contexts/prompts x "
+        f"{settings.samples_per_context} rollouts = {total_samples} total; "
+        f"max_new_tokens={settings.max_new_tokens}; "
+        f"batch_size={settings.batch_size}",
+        flush=True,
+    )
+    print(
+        f"Resolving immutable revisions for model {settings.model_id!r} "
+        f"and tokenizer {tokenizer_id!r}...",
+        flush=True,
+    )
     hf_api = HfApi()
     model_commit = _resolve_repo_commit(
         hf_api, settings.model_id, settings.revision
@@ -337,6 +497,16 @@ def generate_samples(
         tokenizer_commit = _resolve_repo_commit(
             hf_api, tokenizer_id, settings.tokenizer_revision
         )
+    print(
+        f"Resolved revisions: model={model_commit}; "
+        f"tokenizer={tokenizer_commit}",
+        flush=True,
+    )
+    print(
+        f"Loading model with requested device={settings.device!r}, "
+        f"device_map={settings.device_map!r}, dtype={settings.dtype!r}...",
+        flush=True,
+    )
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_id,
         revision=tokenizer_commit,
@@ -374,11 +544,27 @@ def generate_samples(
     terminal_ids = _eos_token_ids(model, tokenizer)
 
     parameter_dtypes = sorted({str(parameter.dtype) for parameter in model.parameters()})
-    hardware_signature = _hardware_signature(torch, device)
     resolved_device_map = {
         str(name): str(value)
         for name, value in getattr(model, "hf_device_map", {}).items()
     }
+    parameter_footprint = _parameter_footprint_by_device(model)
+    mapped_module_counts = dict(
+        sorted(Counter(resolved_device_map.values()).items())
+    )
+    placement_summary = _placement_summary(parameter_footprint, resolved_device_map)
+    hardware_signature = _hardware_signature(torch, device)
+    print(
+        "Sampling placement: "
+        f"actual_model_placement={placement_summary}; "
+        f"model_class={type(model).__name__}; "
+        f"requested_device={settings.device}; resolved_target={device}; "
+        f"input_device={input_device}; "
+        f"parameter_footprint_by_device={json.dumps(parameter_footprint)}; "
+        f"device_map_modules={mapped_module_counts or 'none'}; "
+        f"parameter_dtypes={parameter_dtypes}",
+        flush=True,
+    )
     context_config = getattr(model.config, "text_config", model.config)
     attention_implementation = getattr(
         context_config, "_attn_implementation", None
@@ -386,7 +572,12 @@ def generate_samples(
     context_window = _context_window(context_config)
     prepared_contexts = []
     context_inputs = []
-    for prompt in prompts:
+    print(
+        f"Preflighting {len(prompts)} context(s) against the model context window...",
+        flush=True,
+    )
+    preflight_interval = max(1, (len(prompts) + 9) // 10)
+    for prompt_position, prompt in enumerate(prompts, start=1):
         model_input = _model_input(
             prompt,
             tokenizer,
@@ -422,6 +613,15 @@ def generate_samples(
             }
         )
         prepared_contexts.append((prompt, model_input, input_width))
+        if (
+            prompt_position == len(prompts)
+            or prompt_position % preflight_interval == 0
+        ):
+            print(
+                f"Context preflight: {prompt_position}/{len(prompts)} complete; "
+                f"{len(prompts) - prompt_position} remaining",
+                flush=True,
+            )
 
     store = None
     if checkpoint_dir is not None:
@@ -477,31 +677,102 @@ def generate_samples(
         store = SampleBatchStore(checkpoint_dir, sampling_plan)
 
     samples: List[SampledSequence] = []
+    checkpointed_batches: Dict[
+        Tuple[int, int], Tuple[SampledSequence, ...]
+    ] = {}
+    completed_by_context = [0 for _ in prompts]
+    if store is not None:
+        total_batch_slots = len(prompts) * (
+            (settings.samples_per_context + settings.batch_size - 1)
+            // settings.batch_size
+        )
+        print(
+            f"Scanning {total_batch_slots} expected checkpoint batch slot(s)...",
+            flush=True,
+        )
+        scan_interval = max(1, (total_batch_slots + 9) // 10)
+
+        def show_checkpoint_scan(
+            scanned: int,
+            total: int,
+            completed_rollouts: int,
+        ) -> None:
+            if scanned == total or scanned % scan_interval == 0:
+                print(
+                    f"Checkpoint scan: {scanned}/{total} batch slots checked; "
+                    f"{completed_rollouts}/{total_samples} rollouts already "
+                    "checkpointed",
+                    flush=True,
+                )
+
+        checkpointed_batches, completed_counts = _scan_checkpointed_batches(
+            store,
+            prompts,
+            settings.samples_per_context,
+            settings.batch_size,
+            progress=show_checkpoint_scan,
+        )
+        completed_by_context = list(completed_counts)
+
+    restored_rollouts = sum(completed_by_context)
+    total_completed = restored_rollouts
+    sampled_this_invocation = 0
+    unfinished_contexts = sum(
+        completed < settings.samples_per_context
+        for completed in completed_by_context
+    )
+    print(
+        "Sampling resume state: "
+        f"{restored_rollouts}/{total_samples} rollouts already checkpointed; "
+        f"{total_samples - total_completed} still require model sampling; "
+        f"{unfinished_contexts} unfinished contexts/prompts",
+        flush=True,
+    )
+    last_progress_at = time.monotonic()
+    local_progress_interval = max(
+        1, (settings.samples_per_context + 9) // 10
+    )
     with torch.inference_mode():
         for context_position, (
             prompt,
             model_input,
             input_width,
         ) in enumerate(prepared_contexts):
+            context_completed = completed_by_context[context_position]
+            if context_completed == settings.samples_per_context:
+                print(
+                    f"Sampling context {context_position + 1}/{len(prompts)} "
+                    f"{prompt.context_id!r}: all "
+                    f"{settings.samples_per_context} rollouts restored; "
+                    "no model sampling needed",
+                    flush=True,
+                )
+            else:
+                print(
+                    f"Sampling context {context_position + 1}/{len(prompts)} "
+                    f"{prompt.context_id!r}: {context_completed}/"
+                    f"{settings.samples_per_context} already checkpointed; "
+                    f"{settings.samples_per_context - context_completed} require "
+                    "model sampling",
+                    flush=True,
+                )
             produced = 0
+            last_local_progress_bucket = (
+                context_completed // local_progress_interval
+            )
             while produced < settings.samples_per_context:
                 current_batch = min(
                     settings.batch_size, settings.samples_per_context - produced
                 )
-                completed = (
-                    store.load_batch(
-                        context_position,
-                        prompt.context_id,
-                        produced,
-                        current_batch,
-                    )
-                    if store is not None
-                    else None
+                completed = checkpointed_batches.pop(
+                    (context_position, produced),
+                    None,
                 )
                 if completed is not None:
                     samples.extend(completed)
                     produced += current_batch
                     continue
+
                 batch_seed = _batch_seed(settings, prompt.context_id, produced)
                 torch.manual_seed(batch_seed)
                 if device.startswith("cuda"):
@@ -539,6 +810,51 @@ def generate_samples(
                 samples.extend(batch_samples)
                 produced += current_batch
 
+                total_completed += current_batch
+                sampled_this_invocation += current_batch
+                completed_by_context[context_position] += current_batch
+                context_completed = completed_by_context[context_position]
+                unfinished_contexts = sum(
+                    completed_count < settings.samples_per_context
+                    for completed_count in completed_by_context
+                )
+                now = time.monotonic()
+                local_progress_bucket = (
+                    context_completed // local_progress_interval
+                )
+                should_report = (
+                    context_completed == settings.samples_per_context
+                    or local_progress_bucket > last_local_progress_bucket
+                    or now - last_progress_at >= 30.0
+                )
+                if should_report:
+                    print(
+                        _sampling_progress_message(
+                            context_position=context_position,
+                            context_count=len(prompts),
+                            context_id=prompt.context_id,
+                            context_completed=context_completed,
+                            samples_per_context=settings.samples_per_context,
+                            total_completed=total_completed,
+                            total_samples=total_samples,
+                            unfinished_contexts=unfinished_contexts,
+                            sampled_this_invocation=sampled_this_invocation,
+                        ),
+                        flush=True,
+                    )
+                    last_local_progress_bucket = local_progress_bucket
+                    last_progress_at = now
+
+    if checkpointed_batches:
+        raise RuntimeError("checkpoint scan left unconsumed sample batches")
+    print(
+        "Sampling complete: "
+        f"{total_completed}/{total_samples} rollouts available; "
+        f"{restored_rollouts} restored from checkpoints; "
+        f"{sampled_this_invocation} sampled this invocation",
+        flush=True,
+    )
+
     metadata = {
         "transformers_version": transformers.__version__,
         "torch_version": torch.__version__,
@@ -552,6 +868,8 @@ def generate_samples(
         "requested_device_map": settings.device_map,
         "resolved_device_map": resolved_device_map,
         "input_device": str(input_device),
+        "actual_model_placement": placement_summary,
+        "parameter_footprint_by_device": parameter_footprint,
         "requested_dtype": settings.dtype,
         "resolved_parameter_dtypes": parameter_dtypes,
         "attention_implementation": attention_implementation,

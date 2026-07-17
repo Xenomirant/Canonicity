@@ -1,14 +1,19 @@
 import unittest
 
+from canonicity.core import SampledSequence
 from canonicity.generation import (
     GenerationSettings,
     PromptContext,
     _eos_token_ids,
     _hardware_signature,
     _load_model_exact,
+    _parameter_footprint_by_device,
+    _placement_summary,
     _resolve_repo_commit,
     _resolve_device,
     _resolve_dtype,
+    _scan_checkpointed_batches,
+    _sampling_progress_message,
     generate_samples,
 )
 
@@ -122,6 +127,167 @@ class DeviceResolutionTests(unittest.TestCase):
 
         self.assertEqual(signature["resolved_device"], "cpu")
         self.assertNotIn("cuda_devices", signature)
+
+    def test_parameter_footprint_reports_weight_size_per_actual_device(self):
+        class Parameter:
+            def __init__(self, device, count, element_bytes):
+                self.device = device
+                self.count = count
+                self.element_bytes = element_bytes
+
+            def numel(self):
+                return self.count
+
+            def element_size(self):
+                return self.element_bytes
+
+        model = type(
+            "Model",
+            (),
+            {
+                "parameters": lambda self: iter(
+                    (
+                        Parameter("cuda:0", 10, 2),
+                        Parameter("cuda:0", 5, 4),
+                        Parameter("cpu", 3, 4),
+                    )
+                )
+            },
+        )()
+
+        self.assertEqual(
+            _parameter_footprint_by_device(model),
+            {
+                "cpu": {
+                    "tensors": 1,
+                    "parameters": 3,
+                    "logical_bytes": 12,
+                    "resident_bytes": 12,
+                },
+                "cuda:0": {
+                    "tensors": 2,
+                    "parameters": 15,
+                    "logical_bytes": 40,
+                    "resident_bytes": 40,
+                },
+            },
+        )
+
+    def test_meta_parameter_footprint_is_not_reported_as_resident(self):
+        class Parameter:
+            device = "meta"
+
+            @staticmethod
+            def numel():
+                return 10
+
+            @staticmethod
+            def element_size():
+                return 2
+
+        model = type(
+            "Model",
+            (),
+            {"parameters": lambda self: iter((Parameter(),))},
+        )()
+
+        self.assertEqual(
+            _parameter_footprint_by_device(model)["meta"],
+            {
+                "tensors": 1,
+                "parameters": 10,
+                "logical_bytes": 20,
+                "resident_bytes": 0,
+            },
+        )
+
+    def test_placement_summary_prioritizes_actual_mixed_placement(self):
+        summary = _placement_summary(
+            {"cuda:0": {}, "cpu": {}},
+            {"layer.0": "cuda:0", "layer.1": "cpu"},
+        )
+
+        self.assertEqual(summary, "GPU (CUDA) + CPU")
+
+    def test_numeric_accelerate_device_map_is_reported_as_cuda(self):
+        self.assertEqual(_placement_summary({}, {"": 0}), "GPU (CUDA)")
+
+    def test_progress_reports_true_remaining_work(self):
+        message = _sampling_progress_message(
+            context_position=1,
+            context_count=5,
+            context_id="ctx-2",
+            context_completed=3,
+            samples_per_context=10,
+            total_completed=13,
+            total_samples=50,
+            unfinished_contexts=4,
+            sampled_this_invocation=3,
+        )
+
+        self.assertIn("13/50 completed overall (26.0%)", message)
+        self.assertIn("37 rollouts still require model sampling", message)
+        self.assertIn("4 unfinished contexts/prompts", message)
+        self.assertIn("3 sampled this invocation", message)
+
+    def test_final_progress_has_zero_remaining(self):
+        message = _sampling_progress_message(
+            context_position=4,
+            context_count=5,
+            context_id="ctx-5",
+            context_completed=10,
+            samples_per_context=10,
+            total_completed=50,
+            total_samples=50,
+            unfinished_contexts=0,
+            sampled_this_invocation=7,
+        )
+
+        self.assertIn("50/50 completed overall (100.0%)", message)
+        self.assertIn("0 rollouts still require model sampling", message)
+        self.assertIn("0 unfinished contexts/prompts", message)
+
+    def test_checkpoint_scan_counts_only_valid_completed_batches(self):
+        first_batch = (
+            SampledSequence("one", 0, (1,), "max_length"),
+            SampledSequence("one", 1, (2,), "max_length"),
+        )
+        last_batch = (SampledSequence("two", 4, (3,), "max_length"),)
+
+        class Store:
+            completed = {(0, 0): first_batch, (1, 4): last_batch}
+
+            def load_batch(
+                self,
+                context_position,
+                context_id,
+                start,
+                expected_count,
+            ):
+                batch = self.completed.get((context_position, start))
+                if batch is not None:
+                    self.test_case.assertEqual(len(batch), expected_count)
+                    self.test_case.assertTrue(
+                        all(sample.context_id == context_id for sample in batch)
+                    )
+                return batch
+
+        store = Store()
+        store.test_case = self
+        updates = []
+        batches, counts = _scan_checkpointed_batches(
+            store,
+            (PromptContext("one", "a"), PromptContext("two", "b")),
+            samples_per_context=5,
+            batch_size=2,
+            progress=lambda scanned, total, completed: updates.append(
+                (scanned, total, completed)
+            ),
+        )
+
+        self.assertEqual(set(batches), {(0, 0), (1, 4)})
+        self.assertEqual(counts, (2, 1))
+        self.assertEqual(updates[-1], (6, 6, 3))
 
     def test_programmatic_generation_rejects_two_placement_modes(self):
         settings = GenerationSettings(

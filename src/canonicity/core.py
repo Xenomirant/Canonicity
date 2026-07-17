@@ -2,7 +2,7 @@
 
 import math
 from dataclasses import dataclass
-from typing import Iterable, Optional, Protocol, Sequence, Tuple
+from typing import Callable, Iterable, Optional, Protocol, Sequence, Tuple
 
 
 CANONICITY_EVALUATION_IMPLEMENTATION = "generated-text-canonicity/canonicity-v2"
@@ -183,6 +183,7 @@ def evaluate_samples(
     lengths: Iterable[int],
     *,
     examples_per_length: int = 3,
+    progress: Optional[Callable[[int, int], None]] = None,
 ) -> EvaluationResult:
     """Compute the paper's whole-prefix canonicity rate.
 
@@ -211,7 +212,7 @@ def evaluate_samples(
 
     sequence_results = []
     examples = []
-    for sample in samples:
+    for sample_position, sample in enumerate(samples, start=1):
         statuses = []
         for length in checked_lengths:
             if len(sample.token_ids) < length:
@@ -241,6 +242,8 @@ def evaluate_samples(
         sequence_results.append(
             SequenceResult(sample=sample, prefixes=tuple(statuses))
         )
+        if progress is not None:
+            progress(sample_position, len(samples))
 
     summaries = []
     for context_id in contexts:

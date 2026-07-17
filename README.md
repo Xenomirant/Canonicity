@@ -217,6 +217,23 @@ prompts, and settings. Re-running the same command resumes completed batches;
 any mismatch fails rather than mixing experiments. Use only one writer per job
 directory.
 
+Runtime output is flushed immediately for scheduler logs. Before sampling it
+prints the full workload and the model's **actual** placement, for example
+`actual_model_placement=GPU (CUDA)` or `GPU (CUDA) + CPU`, together with
+parameter counts plus logical and resident bytes by reported device and any
+Accelerate device map. (`meta` tensors have zero resident bytes; the device map
+identifies their offload destination.) It then reports checkpointed versus
+newly sampled rollouts, rollouts still requiring model sampling, and unfinished
+contexts/prompts. The matrix wrapper also prints `Matrix job N/M` and each
+job's total rollout count.
+
+Sampling progress advances only after a complete `model.generate` batch has
+returned and, when an output directory is used, that batch has been atomically
+checkpointed. There is no honest partial count inside an in-flight batch. Use a
+smaller `--batch-size` for finer progress and checkpoint granularity; larger
+batches may improve throughput. Canonicity evaluation and dense segment
+analysis have their own completed/remaining rollout logs.
+
 The segment estimand requires checking every intervening prefix, which is
 generically quadratic in continuation length because tokenization can change at
 the final boundary. This work is CPU-parallel (`--segment-workers`, matrix

@@ -223,11 +223,28 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         prompts,
         checkpoint_dir=args.output,
     )
+
+    print(
+        "Starting canonicity evaluation: "
+        f"{len(samples)} rollouts x {len(args.lengths)} requested lengths",
+        flush=True,
+    )
+
+    def show_evaluation_progress(done: int, total: int) -> None:
+        interval = max(1, (total + 19) // 20)
+        if done == total or done % interval == 0:
+            print(
+                f"Canonicity evaluation: {done}/{total} rollouts complete; "
+                f"{total - done} remaining",
+                flush=True,
+            )
+
     evaluation = evaluate_samples(
         tokenizer,
         samples,
         args.lengths,
         examples_per_length=args.examples_per_length,
+        progress=show_evaluation_progress,
     )
     metadata = {
         "paper": PAPER_URL,
@@ -266,14 +283,25 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         ],
         **runtime_metadata,
     }
+    print("Canonicity evaluation complete; writing report...", flush=True)
     write_report(args.output, evaluation, metadata)
     if args.segment_analysis:
         assert recurrence_horizons is not None
 
+        print(
+            "Starting dense segment analysis: "
+            f"{len(samples)} rollouts; workers={args.segment_workers}",
+            flush=True,
+        )
+
         def show_progress(done: int, total: int) -> None:
-            interval = max(1, total // 20)
+            interval = max(1, (total + 19) // 20)
             if done == total or done % interval == 0:
-                print(f"Segment analysis: {done}/{total} rollouts", flush=True)
+                print(
+                    f"Segment analysis: {done}/{total} rollouts complete; "
+                    f"{total - done} remaining",
+                    flush=True,
+                )
 
         segment_analysis = analyze_segments(
             tokenizer,
@@ -282,6 +310,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             progress=show_progress,
             workers=args.segment_workers,
         )
+        print("Segment analysis complete; writing report...", flush=True)
         write_segment_report(
             args.output,
             segment_analysis,

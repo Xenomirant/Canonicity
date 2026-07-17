@@ -76,6 +76,15 @@ hardware placement, prompts, and all sampling settings match exactly. Dense
 prefix analysis is CPU-parallel (matrix default: four workers) and can be
 restarted independently from `samples.jsonl`.
 
+Logs are unbuffered and phase-specific. The matrix wrapper first prints job
+`N/M` and its planned contexts and rollouts. After loading, the child reports
+actual model placement (`GPU (CUDA)`, `CPU`, or mixed/offloaded), parameter
+footprint by device, checkpointed rollouts, rollouts still requiring model
+sampling, and unfinished contexts. Evaluation and segment-analysis logs also
+include completed and remaining rollout counts. Sampling counts move only at a
+completed batch boundary; reduce `--batch-size` if a single generation call is
+too long to provide useful progress granularity.
+
 Only one process may write a given job directory. Contexts are all tokenized
 and checked against the model context window before the first batch is stored.
 

@@ -1,5 +1,9 @@
 import argparse
+import io
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
 
 from canonicity.cli import parse_lengths
 from canonicity.matrix_cli import main as matrix_main
@@ -47,6 +51,30 @@ class LengthParsingTests(unittest.TestCase):
                     "--dry-run",
                 ]
             )
+
+    def test_matrix_dry_run_prints_job_and_rollout_totals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                matrix_main(
+                    [
+                        "--model",
+                        "mamba-130m",
+                        "--condition",
+                        "unconditional",
+                        "--unconditional-rollouts",
+                        "17",
+                        "--output-root",
+                        str(Path(directory) / "matrix"),
+                        "--dry-run",
+                    ]
+                )
+
+        output = stdout.getvalue()
+        self.assertIn("Matrix job 1/1", output)
+        self.assertIn("contexts/prompts=1", output)
+        self.assertIn("rollouts_per_context=17", output)
+        self.assertIn("total_rollouts=17", output)
 
 
 if __name__ == "__main__":

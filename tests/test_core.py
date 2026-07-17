@@ -111,6 +111,23 @@ class CanonicityTests(unittest.TestCase):
         self.assertIsNone(result.pooled_summaries[0].canonical_ci95_low)
         self.assertIsNone(result.pooled_summaries[0].canonical_ci95_high)
 
+    def test_evaluation_progress_advances_once_per_rollout(self):
+        tokenizer = GreedyTokenizer()
+        samples = (
+            SampledSequence("ctx", 0, (3,), "max_length"),
+            SampledSequence("ctx", 1, (4,), "max_length"),
+        )
+        updates = []
+
+        evaluate_samples(
+            tokenizer,
+            samples,
+            [1],
+            progress=lambda done, total: updates.append((done, total)),
+        )
+
+        self.assertEqual(updates, [(1, 2), (2, 2)])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -249,6 +249,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "--model-revision supplied for unselected models: "
             + ", ".join(sorted(unused_revisions))
         )
+    conditions = tuple(dict.fromkeys(args.condition))
     for alias in aliases:
         spec = MODEL_SPECS[alias]
         effective_device_map = (
@@ -261,20 +262,40 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 "an explicit --device cannot be combined with an active device "
                 "map; use --no-device-map to place the whole model on one device"
             )
-        for condition in dict.fromkeys(args.condition):
-            command, output = _command(args, spec, condition)
-            if (
-                output.exists()
-                and any(output.iterdir())
-                and not (output / "sampling_plan.json").exists()
-            ):
-                raise SystemExit(
-                    "refusing a non-empty output directory without a matching "
-                    f"durable sampling plan: {output}"
-                )
-            print(shlex.join(command), flush=True)
-            if not args.dry_run:
-                subprocess.run(command, check=True)
+
+    jobs = tuple(
+        (MODEL_SPECS[alias], condition)
+        for alias in aliases
+        for condition in conditions
+    )
+    for job_position, (spec, condition) in enumerate(jobs, start=1):
+        command, output = _command(args, spec, condition)
+        if (
+            output.exists()
+            and any(output.iterdir())
+            and not (output / "sampling_plan.json").exists()
+        ):
+            raise SystemExit(
+                "refusing a non-empty output directory without a matching "
+                f"durable sampling plan: {output}"
+            )
+        context_count = 1 if condition == "unconditional" else args.prompt_count
+        rollouts_per_context = (
+            args.unconditional_rollouts
+            if condition == "unconditional"
+            else args.prompt_rollouts
+        )
+        print(
+            f"Matrix job {job_position}/{len(jobs)}: model={spec.alias}; "
+            f"condition={condition}; contexts/prompts={context_count}; "
+            f"rollouts_per_context={rollouts_per_context}; "
+            f"total_rollouts={context_count * rollouts_per_context}; "
+            f"jobs_after_this={len(jobs) - job_position}",
+            flush=True,
+        )
+        print(shlex.join(command), flush=True)
+        if not args.dry_run:
+            subprocess.run(command, check=True)
 
 
 if __name__ == "__main__":
