@@ -1,0 +1,36 @@
+model_alias,model_label,length,prompts_with_survivors,median_survivors_per_prompt,q25_survivors_per_prompt,q75_survivors_per_prompt
+gemma3-4b-it,Gemma 3 4B IT,32,100,16.0,16.0,16.0
+gemma3-4b-it,Gemma 3 4B IT,64,100,16.0,16.0,16.0
+gemma3-4b-it,Gemma 3 4B IT,128,100,16.0,16.0,16.0
+gemma3-4b-it,Gemma 3 4B IT,256,100,15.0,14.0,16.0
+gemma3-4b-it,Gemma 3 4B IT,512,98,9.5,5.0,14.0
+gemma3-4b-it,Gemma 3 4B IT,1024,85,2.0,1.0,4.0
+gemma3-4b-it,Gemma 3 4B IT,2048,47,0.0,0.0,1.0
+qwen3-30b-a3b-instruct-2507,Qwen3 30B-A3B,32,100,16.0,16.0,16.0
+qwen3-30b-a3b-instruct-2507,Qwen3 30B-A3B,64,100,16.0,16.0,16.0
+qwen3-30b-a3b-instruct-2507,Qwen3 30B-A3B,128,100,16.0,16.0,16.0
+qwen3-30b-a3b-instruct-2507,Qwen3 30B-A3B,256,100,16.0,16.0,16.0
+qwen3-30b-a3b-instruct-2507,Qwen3 30B-A3B,512,100,16.0,15.0,16.0
+qwen3-30b-a3b-instruct-2507,Qwen3 30B-A3B,1024,100,14.0,13.0,16.0
+qwen3-30b-a3b-instruct-2507,Qwen3 30B-A3B,2048,100,12.0,10.0,14.0
+gemma-2b-it,Gemma 1 2B IT,32,100,16.0,15.75,16.0
+gemma-2b-it,Gemma 1 2B IT,64,100,15.0,14.0,16.0
+gemma-2b-it,Gemma 1 2B IT,128,98,11.0,8.0,15.0
+gemma-2b-it,Gemma 1 2B IT,256,79,2.0,1.0,7.0
+gemma-2b-it,Gemma 1 2B IT,512,21,0.0,0.0,0.0
+gemma-2b-it,Gemma 1 2B IT,1024,0,0.0,0.0,0.0
+gemma-2b-it,Gemma 1 2B IT,2048,0,0.0,0.0,0.0
+llama2-7b,Llama 2 7B,32,100,16.0,16.0,16.0
+llama2-7b,Llama 2 7B,64,100,16.0,16.0,16.0
+llama2-7b,Llama 2 7B,128,100,16.0,16.0,16.0
+llama2-7b,Llama 2 7B,256,100,16.0,15.0,16.0
+llama2-7b,Llama 2 7B,512,100,16.0,14.0,16.0
+llama2-7b,Llama 2 7B,1024,99,14.0,10.75,15.0
+llama2-7b,Llama 2 7B,2048,97,10.0,4.75,13.0
+mamba-130m,Mamba 130M,32,100,16.0,16.0,16.0
+mamba-130m,Mamba 130M,64,100,16.0,16.0,16.0
+mamba-130m,Mamba 130M,128,100,16.0,16.0,16.0
+mamba-130m,Mamba 130M,256,100,15.0,15.0,16.0
+mamba-130m,Mamba 130M,512,100,14.0,13.0,15.0
+mamba-130m,Mamba 130M,1024,100,12.0,11.0,13.25
+mamba-130m,Mamba 130M,2048,100,9.0,7.0,10.25

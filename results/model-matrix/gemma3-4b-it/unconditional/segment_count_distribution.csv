@@ -1,0 +1,5 @@
+scope,context_id,segment_count,rollouts,percentage
+context,unconditional,0,59,92.1875
+context,unconditional,1,5,7.8125
+pooled,,0,59,92.1875
+pooled,,1,5,7.8125

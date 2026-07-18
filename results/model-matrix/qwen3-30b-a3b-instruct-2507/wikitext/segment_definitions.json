@@ -1,0 +1,16 @@
+{
+  "analysis_implementation": "generated-text-canonicity/segments-v2",
+  "causal_interpretation": "association only; a significant result does not show that one non-canonical segment causes another",
+  "common_odds_ratio_interpretation": "Mantel-Haenszel common-odds-ratio estimate; a single common effect is only a useful summary when prompt-specific odds ratios are sufficiently homogeneous",
+  "pooled_probability_columns": "descriptive pooled probabilities and risk difference are unadjusted; the common odds ratio and exact test are prompt-stratified",
+  "prompt_adjustment": "exact conditional test stratified by context_id when multiple contexts are present; Fisher exact test for one context",
+  "raw_segment_count_interpretation": "lifetime count over the observed continuation; comparisons can be confounded by EOS-driven differences in observed token exposure",
+  "recurrence_exposure": "at least one prior segment completed before the landmark",
+  "recurrence_landmark": "horizon/2",
+  "recurrence_outcome": "at least one new segment starts after the landmark through horizon",
+  "recurrence_risk_set": "rollout reached the horizon and is canonical at the landmark; rollouts inside a non-canonical segment are excluded",
+  "segment": "maximal consecutive run of non-canonical prefix states",
+  "state": "prefix t is non-canonical iff sampled_ids[:t] != encode(decode(sampled_ids[:t]))",
+  "survival_condition": "rollout retained at least horizon observed continuation token IDs",
+  "test_sidedness": "two-sided probability ordering; direction is reported by the common odds ratio and pooled descriptive risk difference"
+}

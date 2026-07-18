@@ -1,0 +1,3 @@
+condition,rollouts,rollouts_with_any_segment,rollouts_with_any_segment_percentage,total_segments,max_segments_in_one_rollout,observed_prefix_states,noncanonical_prefix_states,noncanonical_prefix_state_percentage,median_longest_segment_affected,max_longest_segment
+unconditional,64,5,7.8125,5,1,46116,2483,5.384248417035302,536.0,1037
+wikitext,1600,258,16.125,263,4,1104238,97421,8.822463997797577,245.5,1954

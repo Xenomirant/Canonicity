@@ -1,0 +1,20 @@
+{
+  "artifacts": {
+    "metadata.json": {
+      "sha256": "9d0564018a76253daf35b1db3d0616b1c6e9c5b1f1afbd657651898a2660fe9f"
+    },
+    "noncanonical_examples.jsonl": {
+      "sha256": "3a9edb1a25581e71fbb8c43a4ae0310450bd4b95ecff05a6f2e2c3f28a636faa"
+    },
+    "samples.jsonl": {
+      "sha256": "756b1aa08facab95dc4086d81101086737e0a6e28eb94af208b8f53b08ddd954"
+    },
+    "summary.csv": {
+      "sha256": "97865e72b746da64bbae0a25c277661d7349a2994adabcf06166303727a4a55d"
+    }
+  },
+  "evaluation_implementation": "generated-text-canonicity/canonicity-v2",
+  "rollouts": 64,
+  "sampling_plan_fingerprint": "a63bb1ffb16ae9e7b128782a10afe27967fba4a0385720a85332d2e49b699d51",
+  "schema_version": 1
+}

@@ -1,0 +1,125 @@
+{
+  "canonicity_summary": "results/model-matrix/canonicity_all.csv",
+  "condition_design_fingerprints": {
+    "unconditional": "a1ed49f051830523e8909fe7b093da15dfbd5bb792ecb18603d327de3732ad65",
+    "wikitext": "51d1d36c6e0c4797c9237a68abc7e04d80b576e111a51e3ababa71cfebbd979b"
+  },
+  "condition_designs": {
+    "unconditional": {
+      "contexts": 1,
+      "samples_per_context": 64
+    },
+    "wikitext": {
+      "contexts": 100,
+      "samples_per_context": 16
+    }
+  },
+  "correction": "Benjamini-Yekutieli false-discovery-rate adjustment under arbitrary dependence, computed in log space",
+  "family": "5 models x 2 conditions x 5 fixed horizons",
+  "global_runtime_fingerprint": "08b623509461d6ff89f9a885221a638349f801a546c5db5ee734f62184aa6c30",
+  "model_runtime_fingerprints": {
+    "gemma-2b-it": "7409a2a3f79586b423b059a1a842c384c6090ff7385703dd9b0339b13fc3ed15",
+    "gemma3-4b-it": "a663f9f8eb52c99d00a327705ab19b6031e0455b288b46078146f9e10b5469fc",
+    "llama2-7b": "d796a4e6dd6f1874b3f25edb3bfeffbcd966cf5dea26ceeffc5032881f881722",
+    "mamba-130m": "1c5a482ecaf20838c9159266d25fda8520e45c230710d6f51fe144ca1fd5cf47",
+    "qwen3-30b-a3b-instruct-2507": "1c2eb1d28fbd31dae4c2facb1bed88b3a138f57b4e58b55d3b1bb634ce57ef9e"
+  },
+  "observed_p_values": 25,
+  "planned_hypotheses": 50,
+  "sampling_plan_fingerprints": {
+    "gemma-2b-it/unconditional": "a63bb1ffb16ae9e7b128782a10afe27967fba4a0385720a85332d2e49b699d51",
+    "gemma-2b-it/wikitext": "ff0d5861b7a8f507790e67d396507a41058009214458546257be56dc6486b503",
+    "gemma3-4b-it/unconditional": "ec26b11133f3716c6278be931c53031fc473be19288afc9b226139e441ccae42",
+    "gemma3-4b-it/wikitext": "54b5ba355170c5a1333a3b9b0e4dff3abe55adb73f41d52376dc9a9a1388e89f",
+    "llama2-7b/unconditional": "bc200d90053bf2df6817fee82177cb15ccc0b4dad30c30da876948dd6f6f5666",
+    "llama2-7b/wikitext": "6d07e4cb995e6dc3a7f9fd0b2ee21a263185200b78cfe5bcd02803e581c8985a",
+    "mamba-130m/unconditional": "17cb1b10a50aea56bdf1e6cfbbbb3998cc1070e1297ed7756ba8cf484e90c692",
+    "mamba-130m/wikitext": "24c49b08272d1e4a6d7e3631999006011e12b20718bf09f9dd60e89b8d496cca",
+    "qwen3-30b-a3b-instruct-2507/unconditional": "ac909960d422fdd46fb99d33aa0ba2cab53147e59c10af82247f9729168c885f",
+    "qwen3-30b-a3b-instruct-2507/wikitext": "d041c18c1a3c11fa4635f5ee71085834fe28d81ccacb5415c676f3d3d7b53a32"
+  },
+  "segment_definition_fingerprint": "00736cbaf67f52a1d96f4320bdc89b24ddd49af645ac1601187d3e874549376c",
+  "source_integrity": {
+    "gemma-2b-it/unconditional": {
+      "evaluation_manifest_sha256": "b6237b0474a006a0dcaa038b6a1f41e0e05c334b4e67e438a28ae34d21464b20",
+      "recurrence_sha256": "49f5c8723d45a5984fd402647a7e37204b467d0c7af4a2b4ced71e8d867efdd4",
+      "samples_sha256": "756b1aa08facab95dc4086d81101086737e0a6e28eb94af208b8f53b08ddd954",
+      "sampling_plan_fingerprint": "a63bb1ffb16ae9e7b128782a10afe27967fba4a0385720a85332d2e49b699d51",
+      "segment_analysis_manifest_sha256": "ff6a0822f7d7af8e7cb11cc95ebfece293c288506cfe4c129d61a376ec1a485e",
+      "segments_sha256": "fec37c33723fbfda59bf3020074c3a0a272663fd314bc5d38fcb555f51dcaa27"
+    },
+    "gemma-2b-it/wikitext": {
+      "evaluation_manifest_sha256": "c39a13da8ccd3c6ba80e44cc81c161fc4d91f086d3f10288e387958ea89fcd27",
+      "recurrence_sha256": "696518e092e1c1db52982a8c7b28180bb18e8dd0620c6c2f31bb3f3e098b5474",
+      "samples_sha256": "259d4e8ff8c7351c7d5f53f2140aaeddb3a8c000a9ee67e961f1c6f1ec7221a4",
+      "sampling_plan_fingerprint": "ff0d5861b7a8f507790e67d396507a41058009214458546257be56dc6486b503",
+      "segment_analysis_manifest_sha256": "b12ec7a87684231aed8184f10e08d7359384ee654546e8939793d91314a52156",
+      "segments_sha256": "c50e9d6856888a46ee397912539545b315c265bb4240e8ab32c244997f90dfd8"
+    },
+    "gemma3-4b-it/unconditional": {
+      "evaluation_manifest_sha256": "36de838f2f33d31c8b28bfbe522b5ff9472f356f791f31ca02eda25ef72848bd",
+      "recurrence_sha256": "8424e6ae1e0080952cfce5699eab12451732636db17a4c9aa5791d44bcdf9ca9",
+      "samples_sha256": "fcc502ba3b2e74b89076e238fb95a7480f3d02dff39f436883a7d3530f011526",
+      "sampling_plan_fingerprint": "ec26b11133f3716c6278be931c53031fc473be19288afc9b226139e441ccae42",
+      "segment_analysis_manifest_sha256": "4b50d40e1949f38613df4c17af700915b49c942a5553beb9ca0c16ab21000d56",
+      "segments_sha256": "99e239633b20222fe137b0105bd199363917d12f6ca1dff2f5897a626bbcd49b"
+    },
+    "gemma3-4b-it/wikitext": {
+      "evaluation_manifest_sha256": "d4ff7aa364cf60e461e66483e3a25c53e4d68ea79b10099d7e69c6a1e86abdb5",
+      "recurrence_sha256": "a99255d2eeeec7f5fc59a49f432394ca254f45e0185050955ba0a7484c34d49b",
+      "samples_sha256": "a7292ee0f0babe8ae09404dd9f98fbf116f72679a086758f65154a88cc2f30e7",
+      "sampling_plan_fingerprint": "54b5ba355170c5a1333a3b9b0e4dff3abe55adb73f41d52376dc9a9a1388e89f",
+      "segment_analysis_manifest_sha256": "4d650e83033b4e17350b34062c1aa6f3f8972797d458f7aa52069e59a8b3bc93",
+      "segments_sha256": "24f949ca493c7a62f9a13c6dc699e7b81b1811480658c7750de75549d490ca47"
+    },
+    "llama2-7b/unconditional": {
+      "evaluation_manifest_sha256": "dc1ed01a63ca71013f4bf43d9440d72423abe2944f55a939e1fa4ee31f9c97b7",
+      "recurrence_sha256": "cbf845d7007b985a3caba943378a7bd55458d43db3e48c9f20fe7f8e6862e7bb",
+      "samples_sha256": "e3b168adb1d0c08bd937ca10b8943428471106f94b21a31472932018d38779e4",
+      "sampling_plan_fingerprint": "bc200d90053bf2df6817fee82177cb15ccc0b4dad30c30da876948dd6f6f5666",
+      "segment_analysis_manifest_sha256": "6332a6a7eca49ea83c40980677abc1c8ccd709103ee3216138ab4c40796c6bb5",
+      "segments_sha256": "9e4a8737b797a6687776c5f28a4162fd194bf6ee924117aae1f1e41979844788"
+    },
+    "llama2-7b/wikitext": {
+      "evaluation_manifest_sha256": "e49e4c2d490798e1bc33078cce9e544fb7143c7f388ba1926f3cc508b16c7aff",
+      "recurrence_sha256": "82c12ca03feb8ab4f36632ac5e497bf94937c67b2b1773833d5810dcff7cac27",
+      "samples_sha256": "a99369f348346b2e8d4e407fcbff5b4c20405794e0469bc1231a9ba9712e7d82",
+      "sampling_plan_fingerprint": "6d07e4cb995e6dc3a7f9fd0b2ee21a263185200b78cfe5bcd02803e581c8985a",
+      "segment_analysis_manifest_sha256": "fbb06416463993d0bd7529dc278643f7ba06d3ea0a187a90e9d2b2f3b3d4aa2a",
+      "segments_sha256": "ab01bae62982d53bfa883b08b726697415c8752a32a34c3c933139f51a450900"
+    },
+    "mamba-130m/unconditional": {
+      "evaluation_manifest_sha256": "74b8887e5066ae46bc7018d69f135855c753017b10f5df407b45d9640878ef0d",
+      "recurrence_sha256": "d3684ef5d893e40bf36d94542fd41eea180d2c2be486417174c619f85c216e62",
+      "samples_sha256": "63042b2dcf15c5dde46125cf93ce231dcdb1a485df28bf25729a6ab075909c6c",
+      "sampling_plan_fingerprint": "17cb1b10a50aea56bdf1e6cfbbbb3998cc1070e1297ed7756ba8cf484e90c692",
+      "segment_analysis_manifest_sha256": "8e5945e26ec0746b35f83ff57761e3634825967f2ee2b3d915147f503cf5b883",
+      "segments_sha256": "babf0f3a9a4eeff6e9ea74cea2ce35a3c8bfac5215cad4147c5f48f7106c790a"
+    },
+    "mamba-130m/wikitext": {
+      "evaluation_manifest_sha256": "fe0556e5cabc46050cd8edd6125521c05b9ac765bff92edcd239b6ae6b90b6db",
+      "recurrence_sha256": "79b307c517d9b386b4098eda274a38082e0ccb1370361ae764894f89391d08ff",
+      "samples_sha256": "ba11bace4725fbfee9f8b38f782a39087d551641a9bc98110c9b2ba166a2834f",
+      "sampling_plan_fingerprint": "24c49b08272d1e4a6d7e3631999006011e12b20718bf09f9dd60e89b8d496cca",
+      "segment_analysis_manifest_sha256": "10297f3d5f590237edf375a6c0c684eccff3f08583fea110ffba9000b906de19",
+      "segments_sha256": "82c906134dfbe6f883c730291257ffd9159bab602375ba55b092214f52dd8f67"
+    },
+    "qwen3-30b-a3b-instruct-2507/unconditional": {
+      "evaluation_manifest_sha256": "1517a3b592748f0d763042b1f93896931199175e37ba0258e89bd03b731ad837",
+      "recurrence_sha256": "7c3524f361a2e701e722a96df0dec109ebad44a09007390cfe8231eb83491eb7",
+      "samples_sha256": "3936881da966bf459bdd0cb8ec51046b9eb9da19c49a0e3064fbcf62e6463f5c",
+      "sampling_plan_fingerprint": "ac909960d422fdd46fb99d33aa0ba2cab53147e59c10af82247f9729168c885f",
+      "segment_analysis_manifest_sha256": "42a3bd2b145dcf7a83b125e935ebfe79f36aec4f7c2b2c790fd1325f4a704452",
+      "segments_sha256": "9b20998c8d26ef083bc92611548a936ea65af19e5863075ff5cb5f4abd3cd7b0"
+    },
+    "qwen3-30b-a3b-instruct-2507/wikitext": {
+      "evaluation_manifest_sha256": "d64736d1d4c18c1203afcb598909f72e29a8d4db99fe9e86123e4bdf5ba2789c",
+      "recurrence_sha256": "0f561834c6391ccfc5059fc9e91a695acdce15d99e3ecd8e7df0f9ed9af5dfe3",
+      "samples_sha256": "42115b2683f92ea552e52ca9bf080023c0510019e535fc590c80953a7dae9ba4",
+      "sampling_plan_fingerprint": "d041c18c1a3c11fa4635f5ee71085834fe28d81ccacb5415c676f3d3d7b53a32",
+      "segment_analysis_manifest_sha256": "662ae5b1be1e23f58b685e85c188374d44e27be11c42ce4973ac6dc2ba31dad9",
+      "segments_sha256": "0008d89d42cac69a24cf7ce6149bca62036aadc78818d851bb76585e48ee9304"
+    }
+  },
+  "untestable_hypotheses_assigned_p_one": 25
+}

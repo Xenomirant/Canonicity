@@ -1,0 +1,16 @@
+{
+  "unconditional": {
+    "context_count": 1,
+    "model_commit": "093f9f388b31de276ce2de164bdc2081324b9767",
+    "plan_fingerprint": "ec26b11133f3716c6278be931c53031fc473be19288afc9b226139e441ccae42",
+    "samples_per_context": 64,
+    "tokenizer_commit": "093f9f388b31de276ce2de164bdc2081324b9767"
+  },
+  "wikitext": {
+    "context_count": 100,
+    "model_commit": "093f9f388b31de276ce2de164bdc2081324b9767",
+    "plan_fingerprint": "54b5ba355170c5a1333a3b9b0e4dff3abe55adb73f41d52376dc9a9a1388e89f",
+    "samples_per_context": 16,
+    "tokenizer_commit": "093f9f388b31de276ce2de164bdc2081324b9767"
+  }
+}

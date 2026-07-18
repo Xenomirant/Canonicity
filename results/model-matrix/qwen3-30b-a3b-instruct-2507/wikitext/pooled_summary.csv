@@ -1,0 +1,8 @@
+context_id,length,total_samples,eligible_sequences,terminated_before_length,canonical_sequences,noncanonical_sequences,canonical_percentage,canonical_ci95_low,canonical_ci95_high
+__pooled__,32,1600,1600,0,1578,22,98.625,,
+__pooled__,64,1600,1600,0,1569,31,98.0625,,
+__pooled__,128,1600,1598,2,1552,46,97.12140175219024,,
+__pooled__,256,1600,1584,16,1518,66,95.83333333333333,,
+__pooled__,512,1600,1540,60,1424,116,92.46753246753246,,
+__pooled__,1024,1600,1409,191,1239,170,87.9347054648687,,
+__pooled__,2048,1600,1177,423,958,219,81.39337298215803,,

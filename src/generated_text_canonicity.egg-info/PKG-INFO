@@ -36,10 +36,11 @@ curve was produced from independent truncations or shared long rollouts. This
 replication fixes those operational choices explicitly: canonical re-encoding
 uses no added special tokens; decoding cleanup is disabled; the seed/prompt and
 terminating EOS are excluded; every other sampled control token is retained;
-and every eligible prefix of each saved rollout is evaluated independently. A
-non-canonical prefix does not permanently taint a longer prefix, because a
-completed byte sequence or changed final merge boundary can make the longer
-round trip canonical.
+and every requested eligible prefix of each saved rollout is evaluated
+independently. A non-canonical prefix does not permanently taint a longer
+prefix, because a completed byte sequence or changed final merge boundary can
+make the longer round trip canonical. The optional dense segment analysis
+separately evaluates every intervening prefix `t`.
 
 ### Non-canonical segments and recurrence
 
@@ -51,8 +52,8 @@ this makes the number of deviations per rollout unambiguous without inventing
 a token-local label.
 
 At each even horizon `H`, the landmark is `H/2`. The recurrence risk set keeps
-only rollouts that retained at least `H` observed continuation token IDs and are canonical at
-the landmark:
+only rollouts that retained at least `H` observed continuation token IDs and
+are canonical at the landmark:
 
 - exposure: at least one prior segment completed before the landmark;
 - outcome: a new segment starts after the landmark through `H`.

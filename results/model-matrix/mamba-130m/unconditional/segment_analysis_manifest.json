@@ -1,0 +1,34 @@
+{
+  "analysis_implementation": "generated-text-canonicity/segments-v2",
+  "artifacts": {
+    "recurrence.csv": {
+      "sha256": "d3684ef5d893e40bf36d94542fd41eea180d2c2be486417174c619f85c216e62"
+    },
+    "rollout_segments.csv": {
+      "sha256": "b7b81ad46fbadcc0f416d79c59450bd6cda37cbae0c09dc726c81f265acabaa1"
+    },
+    "segment_count_distribution.csv": {
+      "sha256": "febc8291921cc58cd1788a06788fe1b7e6d3b3856e6a0402216fdbedc0074952"
+    },
+    "segment_definitions.json": {
+      "sha256": "a8f6540204aef15ab6d8eefad1aa47f73053046e63b463e974ab6e5f0cd9307b"
+    },
+    "segments.jsonl": {
+      "sha256": "babf0f3a9a4eeff6e9ea74cea2ce35a3c8bfac5215cad4147c5f48f7106c790a"
+    }
+  },
+  "recurrence_horizons": [
+    128,
+    256,
+    512,
+    1024,
+    2048
+  ],
+  "rollouts": 64,
+  "sampling_plan_fingerprint": "17cb1b10a50aea56bdf1e6cfbbbb3998cc1070e1297ed7756ba8cf484e90c692",
+  "schema_version": 1,
+  "source_samples": {
+    "path": "samples.jsonl",
+    "sha256": "63042b2dcf15c5dde46125cf93ce231dcdb1a485df28bf25729a6ab075909c6c"
+  }
+}

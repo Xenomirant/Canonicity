@@ -1,0 +1,6 @@
+horizon,landmark,surviving_rollouts,at_risk_rollouts,excluded_noncanonical_at_landmark,eligible_contexts,informative_contexts,prior_and_future,prior_only,future_only,neither,pooled_future_probability_given_prior,pooled_future_probability_given_no_prior,pooled_future_risk_difference,common_odds_ratio,test_name,test_statistic,p_value,log10_p_value
+128,64,1573,1556,17,100,0,0,1,19,1536,0.0,0.012218649517684888,-0.012218649517684888,,,,,
+256,128,1437,1405,32,100,0,0,0,54,1351,,0.038434163701067614,,,,,,
+512,256,937,889,48,98,0,0,1,59,829,0.0,0.06644144144144144,-0.06644144144144144,,,,,
+1024,512,274,249,25,84,1,0,2,27,220,0.0,0.10931174089068826,-0.10931174089068826,0.0,exact_stratified_conditional,,1.0,0.0
+2048,1024,67,58,9,43,0,0,0,2,56,,0.034482758620689655,,,,,,

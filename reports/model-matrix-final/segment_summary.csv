@@ -1,0 +1,11 @@
+model_alias,model_label,condition,rollouts,rollouts_with_segment,rollouts_with_segment_percentage,total_segments,median_segments_affected,maximum_segments,observed_prefix_states,noncanonical_prefix_states,noncanonical_prefix_state_percentage,median_longest_segment_affected,maximum_segment_length
+gemma3-4b-it,Gemma 3 4B IT,unconditional,64,5,7.8125,5,1.0,1,46116,2483,5.384248417035302,536.0,1037
+gemma3-4b-it,Gemma 3 4B IT,wikitext,1600,258,16.125,263,1.0,4,1104238,97421,8.822463997797577,245.5,1954
+qwen3-30b-a3b-instruct-2507,Qwen3 30B-A3B,unconditional,64,34,53.125,208,4.0,55,75058,24347,32.43758160355991,355.5,2045
+qwen3-30b-a3b-instruct-2507,Qwen3 30B-A3B,wikitext,1600,605,37.8125,2796,1.0,283,2882891,310791,10.780532458563297,2.0,2045
+gemma-2b-it,Gemma 1 2B IT,unconditional,64,30,46.875,30,1.0,1,14013,6005,42.85306501106116,214.0,447
+gemma-2b-it,Gemma 1 2B IT,wikitext,1600,81,5.0625,81,1.0,1,321795,12554,3.901241473608975,133.0,481
+llama2-7b,Llama 2 7B,unconditional,64,21,32.8125,39,1.0,9,53380,9730,18.22780067440989,339.0,1992
+llama2-7b,Llama 2 7B,wikitext,1600,793,49.5625,1059,1.0,84,2534087,784204,30.94621455380182,895.0,2048
+mamba-130m,Mamba 130M,unconditional,64,52,81.25,263,3.5,29,50524,31230,61.81220805953607,282.0,2035
+mamba-130m,Mamba 130M,wikitext,1600,1554,97.125,2755,1.0,53,2472803,1943140,78.58046112043701,1447.5,2047
